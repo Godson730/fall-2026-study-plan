@@ -34,6 +34,7 @@
     state.updated = Date.now();
     try { localStorage.setItem(LS_STATE, JSON.stringify(state)); }
     catch (e) { toast("Your ticks couldn’t be saved. Check that this browser allows site storage."); }
+    syncToWorker();
   }
   function savePrefs() {
     try { localStorage.setItem(LS_UI, JSON.stringify(prefs)); } catch (e) {}
@@ -163,7 +164,7 @@
     else if (ni < 0) status = '<span class="sub">Classes start Thu Sep 10</span>';
     else status = '<span class="sub">Classes have ended</span>';
 
-    var h = installBanner();
+    var h = installBanner() || reminderBanner();
     h += '<section class="wk-top" aria-label="Week summary"><div class="wk-status">' + status +
       '<p class="wk-count">' + pipsHtml(w) + d + " of 4 done</p></div>";
     if (w.note) h += '<p class="wk-note">' + esc(w.note) + "</p>";
@@ -300,6 +301,8 @@
         "</section>";
     }
 
+    h += reminderSection();
+
     h += '<section class="section"><h2>A study week</h2><p class="sub">About six hours per course, roughly 24 hours a week. Do the steps in order.</p><ol class="loop">' +
       '<li><b>Preview<span class="hrs">20 min</span></b><p>Read the section headings and the end-of-chapter summary first.</p></li>' +
       '<li><b>Read<span class="hrs">2 h</span></b><p>After each worked example, close the book and redo it yourself.</p></li>' +
@@ -374,6 +377,126 @@
     t.hidden = false;
     clearTimeout(toastTimer);
     toastTimer = setTimeout(function () { t.hidden = true; }, 3200);
+  }
+
+  /* ---------- daily reminders ---------- */
+
+  var CFG = window.REMINDER_CONFIG || {};
+  var remind = { sub: null };
+
+  function pushSupported() {
+    return "serviceWorker" in navigator && "PushManager" in window && "Notification" in window && location.protocol !== "file:";
+  }
+
+  function keyBytes(b64) {
+    var s = (b64 + "===".slice((b64.length + 3) % 4)).replace(/-/g, "+").replace(/_/g, "/");
+    var raw = atob(s), out = new Uint8Array(raw.length);
+    for (var i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+    return out;
+  }
+
+  function reminderCode() {
+    return remind.sub ? "SPR1-" + btoa(JSON.stringify(remind.sub.toJSON())) : "";
+  }
+
+  /* The service worker reads this copy of your ticks to write each day’s reminder. */
+  function syncToWorker() {
+    if (!("caches" in window)) return;
+    caches.open("studyplan-progress").then(function (c) {
+      return c.put("./progress.json", new Response(JSON.stringify(state), { headers: { "Content-Type": "application/json" } }));
+    }).catch(function () {});
+  }
+
+  function checkReminders() {
+    if (!pushSupported()) return;
+    navigator.serviceWorker.ready
+      .then(function (reg) { return reg.pushManager.getSubscription(); })
+      .then(function (sub) { if (sub) { remind.sub = sub; render(); } })
+      .catch(function () {});
+  }
+
+  function turnOnReminders() {
+    if (!pushSupported()) { toast("This browser can’t show reminders."); return; }
+    if (!CFG.vapidPublicKey || CFG.vapidPublicKey.indexOf("__") === 0) { toast("Reminders aren’t set up on GitHub yet."); return; }
+    Promise.resolve(Notification.requestPermission()).then(function (perm) {
+      if (perm !== "granted") {
+        render();
+        toast("Notifications are blocked. Allow them for Study Plan in your phone’s settings, then try again.");
+        return null;
+      }
+      return navigator.serviceWorker.ready.then(function (reg) {
+        return reg.pushManager.getSubscription().then(function (existing) {
+          return existing || reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyBytes(CFG.vapidPublicKey) });
+        });
+      });
+    }).then(function (sub) {
+      if (!sub) return;
+      remind.sub = sub;
+      render();
+      toast("Reminder turned on. Finish the steps below.");
+    }).catch(function () {
+      toast("Couldn’t turn on the reminder. Check your connection and try again.");
+    });
+  }
+
+  function turnOffReminders() {
+    if (!remind.sub) return;
+    remind.sub.unsubscribe().then(function () {
+      remind.sub = null;
+      render();
+      toast("Reminder turned off on this device");
+    }, function () { toast("Couldn’t turn off the reminder. Try again."); });
+  }
+
+  function copyReminderCode() {
+    var code = reminderCode(), box = document.getElementById("rem-code");
+    function fallback() {
+      if (box) { box.focus(); box.select(); }
+      toast("Select the code in the box and copy it.");
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(code).then(function () { toast("Reminder code copied"); }, fallback);
+    else fallback();
+  }
+
+  function previewReminder() {
+    var m = window.buildReminder(P, state, new Date());
+    navigator.serviceWorker.ready.then(function (reg) {
+      return reg.showNotification(m.title, { body: m.body, icon: "icons/icon-192.png", badge: "icons/badge-96.png", tag: "daily-reminder" });
+    }).then(function () { toast("Preview sent. Check your notifications."); }, function () { toast("Couldn’t show a notification on this device."); });
+  }
+
+  function reminderBanner() {
+    if (!pushSupported() || !isStandalone() || remind.sub || prefs.hideReminderTip || Notification.permission === "denied") return "";
+    return '<div class="banner"><p><b>Get a daily reminder</b>One notification each morning with today’s courses.</p>' +
+      '<button type="button" class="linkbtn" data-act="tab" data-tab="guide">Set it up</button>' +
+      '<button type="button" class="x" data-act="hide-remind" aria-label="Dismiss">' + ICON.close + "</button></div>";
+  }
+
+  function reminderSection() {
+    var time = esc(CFG.timeLabel || "8:00 a.m.");
+    var h = '<section class="remind" aria-labelledby="h-remind"><h2 class="ab-title" id="h-remind">Daily reminder</h2>';
+    if (!pushSupported()) {
+      h += (isIOS() && !isStandalone())
+        ? '<p class="sub">On iPhone, reminders only work in the Home Screen app. Add Study Plan to your Home Screen with the steps below, open it from its icon, then come back to this tab.</p>'
+        : '<p class="sub">This browser can’t show reminders. On Android, open the app in Chrome. On iPhone, use the Home Screen app (iOS 16.4 or later).</p>';
+      return h + "</section>";
+    }
+    if (Notification.permission === "denied") {
+      return h + '<p class="sub">Notifications are blocked for this app. iPhone: Settings → Notifications → Study Plan. Android: press and hold the app icon → App info → Notifications. Then reopen the app.</p></section>';
+    }
+    if (!remind.sub) {
+      return h + '<p class="sub">One notification a day at ' + time + ' Guelph time with today’s courses from the day plan, how many of this week’s tasks are done, and a heads-up when a midterm or exam is within a week.</p>' +
+        '<div class="btns"><button type="button" class="btn" data-act="remind-on">Turn on daily reminder</button></div></section>';
+    }
+    h += '<p class="state on"><i></i>On for this device · every day at ' + time + "</p>" +
+      '<ol class="steps">' +
+        '<li><span>Copy your reminder code.</span><textarea id="rem-code" readonly spellcheck="false" aria-label="Reminder code">' + esc(reminderCode()) + '</textarea><span class="btns"><button type="button" class="btn" data-act="remind-copy">Copy reminder code</button></span></li>' +
+        '<li><span>On GitHub, add a secret named <span class="kv">PUSH_SUBSCRIPTIONS</span> and paste the code as its value, then tap <b>Add secret</b>. For more than one device, put each code on its own line.</span><span class="btns"><a class="btn ghost" href="https://github.com/' + esc(CFG.repo || "") + '/settings/secrets/actions/new" target="_blank" rel="noopener">Open GitHub secrets</a></span></li>' +
+        '<li><span>Check that notifications appear on this device.</span><span class="btns"><button type="button" class="btn ghost" data-act="remind-preview">Show a preview now</button></span></li>' +
+      "</ol>" +
+      '<p class="sub">You only do this once per device. If you reinstall the app, turn the reminder on again and replace the code on GitHub.</p>' +
+      '<div class="btns"><button type="button" class="linkbtn" data-act="remind-off">Turn off reminder on this device</button></div>';
+    return h + "</section>";
   }
 
   /* ---------- progress codes ---------- */
@@ -456,6 +579,11 @@
       installEvent.prompt();
       installEvent.userChoice.then(function () { installEvent = null; render(); }, function () {});
     }
+    else if (act === "remind-on") turnOnReminders();
+    else if (act === "remind-off") turnOffReminders();
+    else if (act === "remind-copy") copyReminderCode();
+    else if (act === "remind-preview") previewReminder();
+    else if (act === "hide-remind") { prefs.hideReminderTip = true; savePrefs(); render(); }
     else if (act === "copy-code") copyCode();
     else if (act === "import-code") importCode();
   });
@@ -498,10 +626,12 @@
   window.addEventListener("appinstalled", function () { installEvent = null; render(); });
 
   document.addEventListener("visibilitychange", function () {
-    if (document.visibilityState === "visible") render();
+    if (document.visibilityState === "visible" && tab !== "guide") render();
   });
 
   render();
+  syncToWorker();
+  checkReminders();
 
   if ("serviceWorker" in navigator && location.protocol !== "file:") {
     window.addEventListener("load", function () {

@@ -151,5 +151,5 @@
     ["A&T", "Algebra and Trigonometry 2e (OpenStax) — refresher only", "IPS1500", "https://openstax.org/details/books/algebra-and-trigonometry-2e"]
   ];
 
-  window.PLAN = { COURSES: COURSES, WEEKS: WEEKS, EXAM: EXAM, SETUP: SETUP, EXAM_TASKS: EXAM_TASKS, BOOKS: BOOKS };
+  self.PLAN = { COURSES: COURSES, WEEKS: WEEKS, EXAM: EXAM, SETUP: SETUP, EXAM_TASKS: EXAM_TASKS, BOOKS: BOOKS };
 })();

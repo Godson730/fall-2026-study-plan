@@ -1,0 +1,36 @@
+name: Daily reminder
+
+on:
+  schedule:
+    # Two runs a day; the script only sends at the chosen Guelph hour, so it stays right through daylight saving changes.
+    - cron: "7 11 * * *"
+    - cron: "7 12 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  remind:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install web-push
+        run: npm install --no-save --no-package-lock web-push@3.6.7
+      - name: Send reminder
+        run: node scripts/send-reminder.mjs
+        env:
+          REMINDER_HOUR: "7"
+          MANUAL_RUN: ${{ github.event_name == 'workflow_dispatch' }}
+          VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
+          PUSH_SUBSCRIPTIONS: ${{ secrets.PUSH_SUBSCRIPTIONS }}
+      # GitHub pauses scheduled workflows after 60 days without repository activity; this keeps it on until December.
+      - name: Keep the daily schedule switched on
+        if: always()
+        run: gh api -X PUT "repos/${{ github.repository }}/actions/workflows/reminders.yml/enable"
+        env:
+          GH_TOKEN: ${{ github.token }}
