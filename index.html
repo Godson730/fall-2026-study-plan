@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Fall 2026 Study Plan</title>
+<meta name="description" content="Week-by-week readings, problem sets and a progress checklist for CHEM*1050, CHEM*2700, BIOC*2580 and IPS*1500.">
+<meta name="theme-color" content="#F3F5F2" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111513" media="(prefers-color-scheme: dark)">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Study Plan">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="stylesheet" href="fonts/fonts.css">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="app">
+  <header class="appbar" id="appbar"></header>
+  <main id="view" tabindex="-1"></main>
+</div>
+
+<nav class="tabs" aria-label="Sections">
+  <button type="button" class="tab" data-tab="week">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15.5" rx="2.5"/><path d="M3.5 9.5h17M8 3v4M16 3v4M9 15l2 2 4-4"/></svg>
+    <span>Week</span>
+  </button>
+  <button type="button" class="tab" data-tab="semester">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h3M11 6h9M4 12h3M11 12h9M4 18h3M11 18h6"/></svg>
+    <span>Semester</span>
+  </button>
+  <button type="button" class="tab" data-tab="exams">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5.5 21V3.5M5.5 4h12l-2.5 4.25L17.5 12.5h-12"/></svg>
+    <span>Exams</span>
+  </button>
+  <button type="button" class="tab" data-tab="guide">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5.5A2.5 2.5 0 0 1 7.5 3H19v15H7.5A2.5 2.5 0 0 0 5 20.5z"/><path d="M5 20.5A2.5 2.5 0 0 0 7.5 23H19v-5"/></svg>
+    <span>Guide</span>
+  </button>
+</nav>
+
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+<noscript><p style="padding:24px;font-family:sans-serif">This study plan needs JavaScript turned on.</p></noscript>
+<script src="data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
