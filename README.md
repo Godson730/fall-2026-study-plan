@@ -19,3 +19,7 @@ iPhone needs the app added to the Home Screen (iOS 16.4 or later).
 ## Review questions
 
 Every weekly topic has five review questions with worked answers (`questions.js`). Open them from the **Review questions** button on each Week card, mark each one Got it or Review again, and find the ones to redo in the Semester tab.
+
+## Flashcards
+
+The Cards tab has flashcards for key formulas and reactions (`flashcards.js`), tagged by course and week. Study them one at a time (tap to flip, mark Know it or Still learning) or switch to List for a formula sheet. Each Week card links to that week's flashcards.

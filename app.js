@@ -29,7 +29,13 @@
         if (/^w\d{1,2}-c\d{4}-q\d{1,2}$/.test(k) && (s.quiz[k] === "got" || s.quiz[k] === "again")) quizMarks[k] = s.quiz[k];
       });
     }
-    return { v: 1, updated: Number(s.updated) || 0, done: done, dates: dates, quiz: quizMarks };
+    var cardMarks = {};
+    if (s.cards && typeof s.cards === "object") {
+      Object.keys(s.cards).forEach(function (k) {
+        if (/^fc-c\d{4}-\d{2}$/.test(k) && (s.cards[k] === "know" || s.cards[k] === "learning")) cardMarks[k] = s.cards[k];
+      });
+    }
+    return { v: 1, updated: Number(s.updated) || 0, done: done, dates: dates, quiz: quizMarks, cards: cardMarks };
   }
 
   var state;
@@ -194,7 +200,7 @@
         '<span class="topic">' + esc(t.t) + "</span>" +
         '<span class="reads">' + reads + "</span>" +
         '<span class="do"><span class="label">Practise</span>' + esc(t.d) + "</span>" +
-        "</label>" + quizButton(id) + "</li>";
+        "</label>" + quizButton(id) + cardsButton(w, c.key) + "</li>";
     });
     h += "</ul>";
 
@@ -351,7 +357,7 @@
 
   /* ---------- render ---------- */
 
-  var TABS = { week: weekTab, semester: semesterTab, exams: examsTab, guide: guideTab, quiz: quizTab };
+  var TABS = { week: weekTab, semester: semesterTab, cards: cardsTab, exams: examsTab, guide: guideTab, quiz: quizTab };
 
   function render(opts) {
     var r = TABS[tab]();
@@ -492,6 +498,151 @@
       "</section>";
   }
 
+  /* ---------- flashcards ---------- */
+
+  var CARDS = window.FLASHCARDS || [];
+  var CARD_BY_ID = {};
+  CARDS.forEach(function (c) { CARD_BY_ID[c.id] = c; });
+
+  var fc = {
+    course: prefs.fcCourse || "all",
+    range: prefs.fcRange === "all" ? "all" : "sofar",
+    week: null,
+    mode: prefs.fcMode === "list" ? "list" : "study",
+    order: null,
+    pos: 0,
+    flipped: false,
+    onlyLearning: false
+  };
+
+  function currentWeekNo() {
+    var ni = nowIndex();
+    return ni < 0 ? 1 : Math.min(WEEKS.length, ni + 1);
+  }
+
+  function fcFiltered() {
+    var cw = currentWeekNo(), wk = fc.week || cw;
+    return CARDS.filter(function (c) {
+      if (fc.course !== "all" && c.c !== fc.course) return false;
+      if (fc.range === "week") return c.w === wk;
+      if (fc.range === "sofar") return c.w <= cw;
+      return true;
+    });
+  }
+
+  function fcDeck() {
+    if (!fc.order) {
+      var list = fcFiltered();
+      if (fc.onlyLearning) list = list.filter(function (c) { return state.cards[c.id] === "learning"; });
+      var fresh = list.filter(function (c) { return state.cards[c.id] !== "know"; });
+      var known = list.filter(function (c) { return state.cards[c.id] === "know"; });
+      fc.order = fresh.concat(known).map(function (c) { return c.id; });
+      fc.pos = 0;
+      fc.flipped = false;
+    }
+    return fc.order.map(function (id) { return CARD_BY_ID[id]; }).filter(Boolean);
+  }
+
+  function fcResetDeck() { fc.order = null; fc.onlyLearning = false; fc.flipped = false; }
+
+  function fcStep(delta) {
+    var deck = fcDeck();
+    var n = Math.max(0, Math.min(deck.length, fc.pos + delta));
+    if (n === fc.pos) return;
+    fc.pos = n;
+    fc.flipped = false;
+    render();
+  }
+
+  function lines(text) { return esc(text).split(";  ").join("<br>"); }
+
+  function cardsButton(w, key) {
+    var n = CARDS.filter(function (c) { return c.c === key && c.w === w.n; }).length;
+    if (!n) return "";
+    return '<button type="button" class="quiz-btn" data-act="cards-for" data-c="' + key + '" data-w="' + w.n + '"><span>Flashcards</span><span class="qmeta">' + n + (n === 1 ? " card" : " cards") + "</span>" + ICON.right + "</button>";
+  }
+
+  function cardsTab() {
+    var top = '<div class="ab-mid"><h1 class="ab-title">Flashcards</h1><p class="ab-sub">Key formulas and reactions</p></div>';
+    var cw = currentWeekNo(), wk = fc.week || cw;
+
+    function pressed(on) { return ' aria-pressed="' + on + '"'; }
+    var h = '<section class="fc-controls">';
+    h += '<div class="chips" role="group" aria-label="Course">' +
+      '<button type="button" class="chip" data-act="fc-course" data-v="all"' + pressed(fc.course === "all") + ">All courses</button>";
+    COURSES.forEach(function (c) {
+      h += '<button type="button" class="chip ' + c.key + '" data-act="fc-course" data-v="' + c.key + '"' + pressed(fc.course === c.key) + '><i class="dot"></i>' + esc(c.code) + "</button>";
+    });
+    h += "</div>";
+    h += '<div class="seg" role="group" aria-label="Weeks">' +
+      '<button type="button" data-act="fc-range" data-v="week"' + pressed(fc.range === "week") + ">" + (wk === cw ? "This week" : "Week " + wk) + "</button>" +
+      '<button type="button" data-act="fc-range" data-v="sofar"' + pressed(fc.range === "sofar") + ">Up to week " + cw + "</button>" +
+      '<button type="button" data-act="fc-range" data-v="all"' + pressed(fc.range === "all") + ">All weeks</button></div>";
+    h += '<div class="seg" role="group" aria-label="View">' +
+      '<button type="button" data-act="fc-mode" data-v="study"' + pressed(fc.mode === "study") + ">Study</button>" +
+      '<button type="button" data-act="fc-mode" data-v="list"' + pressed(fc.mode === "list") + ">List</button></div>";
+
+    var all = fcFiltered();
+    var knownN = all.filter(function (c) { return state.cards[c.id] === "know"; }).length;
+    var learningN = all.filter(function (c) { return state.cards[c.id] === "learning"; }).length;
+    h += '<p class="sub">' + all.length + (all.length === 1 ? " card" : " cards") + " · " + knownN + " know it · " + learningN + " still learning</p></section>";
+
+    if (fc.mode === "list") {
+      if (!all.length) return { top: top, body: h + '<p class="sub">No cards match these filters.</p>', plain: true };
+      var weeksSeen = [];
+      all.forEach(function (c) { if (weeksSeen.indexOf(c.w) < 0) weeksSeen.push(c.w); });
+      weeksSeen.sort(function (a, b) { return a - b; }).forEach(function (wn) {
+        h += '<section class="fc-week"><p class="label">Week ' + wn + '</p><ul class="fc-list">';
+        all.filter(function (c) { return c.w === wn; }).forEach(function (card) {
+          var mark = state.cards[card.id];
+          h += '<li class="fc-item ' + card.c + '"><span class="fc-item-top"><span class="code"><i class="dot"></i>' + esc(course(card.c).code) + "</span>" +
+            (mark ? '<span class="qchip ' + (mark === "know" ? "got" : "again") + '">' + (mark === "know" ? "Know it" : "Still learning") + "</span>" : "") + "</span>" +
+            '<p class="fc-q">' + esc(card.f) + '</p><p class="fc-a">' + lines(card.b) + "</p>" +
+            (card.n ? '<p class="fc-n">' + esc(card.n) + "</p>" : "") + "</li>";
+        });
+        h += "</ul></section>";
+      });
+      return { top: top, body: h, plain: true };
+    }
+
+    var deck = fcDeck();
+    if (!deck.length) {
+      h += '<section class="fc-done"><h2>No cards here</h2><p class="sub">' +
+        (fc.onlyLearning ? "Nothing in this set is marked Still learning." : "No cards match these filters. Try All weeks or All courses.") + "</p>" +
+        (fc.onlyLearning ? '<div class="btns"><button type="button" class="btn ghost" data-act="fc-restart">Study all cards</button></div>' : "") + "</section>";
+      return { top: top, body: h, plain: true };
+    }
+
+    if (fc.pos >= deck.length) {
+      var k = deck.filter(function (c) { return state.cards[c.id] === "know"; }).length;
+      var l = deck.filter(function (c) { return state.cards[c.id] === "learning"; }).length;
+      h += '<section class="fc-done"><h2>Deck finished</h2><p>' + deck.length + (deck.length === 1 ? " card: " : " cards: ") + k + " know it, " + l + " still learning.</p>" +
+        '<div class="btns">' + (l ? '<button type="button" class="btn" data-act="fc-learning">Study the ' + l + " still learning</button>" : "") +
+        '<button type="button" class="btn ghost" data-act="fc-restart">Start again</button></div></section>';
+      return { top: top, body: h, plain: true };
+    }
+
+    var card = deck[fc.pos], cc = course(card.c), mark = state.cards[card.id] || "";
+    h += '<p class="fc-pos"><span>Card ' + (fc.pos + 1) + " of " + deck.length + "</span>" +
+      (mark ? '<span class="qchip ' + (mark === "know" ? "got" : "again") + '">' + (mark === "know" ? "Know it" : "Still learning") + "</span>" : "") +
+      '<button type="button" class="linkbtn" data-act="fc-shuffle">Shuffle</button></p>';
+    h += '<div class="fc-card ' + card.c + (fc.flipped ? " is-flipped" : "") + '" role="button" tabindex="0" data-act="fc-flip" aria-label="' + (fc.flipped ? "Card showing the answer. Tap to see the prompt." : "Card showing the prompt. Tap to see the answer.") + '">' +
+      '<div class="fc-inner">' +
+        '<div class="fc-face fc-front"' + (fc.flipped ? ' aria-hidden="true"' : "") + '><span class="code"><i class="dot"></i>' + esc(cc.code + " · Week " + card.w) + '</span><p class="fc-prompt">' + esc(card.f) + '</p><span class="fc-hint">Tap to flip</span></div>' +
+        '<div class="fc-face fc-back"' + (fc.flipped ? "" : ' aria-hidden="true"') + '><span class="code"><i class="dot"></i>' + esc(cc.code + " · Week " + card.w) + '</span><p class="fc-answer">' + lines(card.b) + "</p>" +
+          (card.n ? '<p class="fc-note">' + esc(card.n) + "</p>" : '<span class="fc-hint">Tap to flip back</span>') + "</div>" +
+      "</div></div>";
+    h += '<div class="fc-actions">' +
+      '<button type="button" class="iconbtn" data-act="fc-prev" aria-label="Previous card"' + (fc.pos === 0 ? " disabled" : "") + ">" + ICON.left + "</button>" +
+      (fc.flipped
+        ? '<button type="button" class="qmark again' + (mark === "learning" ? " on" : "") + '" data-act="fc-mark" data-v="learning">Still learning</button>' +
+          '<button type="button" class="qmark got' + (mark === "know" ? " on" : "") + '" data-act="fc-mark" data-v="know">Know it</button>'
+        : '<button type="button" class="btn" data-act="fc-flip">Show answer</button>') +
+      '<button type="button" class="iconbtn" data-act="fc-next" aria-label="Next card">' + ICON.right + "</button></div>" +
+      '<p class="sub fc-tip">Swipe left or right to move between cards.</p>';
+    return { top: top, body: h, plain: true };
+  }
+
   /* ---------- daily reminders ---------- */
 
   var CFG = window.REMINDER_CONFIG || {};
@@ -615,7 +766,7 @@
   /* ---------- progress codes ---------- */
 
   function makeCode() {
-    var payload = JSON.stringify({ d: Object.keys(state.done), t: state.dates, q: state.quiz, u: state.updated });
+    var payload = JSON.stringify({ d: Object.keys(state.done), t: state.dates, q: state.quiz, k: state.cards, u: state.updated });
     return "SP1-" + btoa(unescape(encodeURIComponent(payload)));
   }
   function readCode(str) {
@@ -625,7 +776,7 @@
       var o = JSON.parse(decodeURIComponent(escape(atob(str.slice(4)))));
       var done = {};
       (Array.isArray(o.d) ? o.d : []).forEach(function (k) { done[k] = true; });
-      return norm({ done: done, dates: o.t, quiz: o.q, updated: o.u });
+      return norm({ done: done, dates: o.t, quiz: o.q, cards: o.k, updated: o.u });
     } catch (e) { return null; }
   }
 
@@ -663,6 +814,9 @@
     Object.keys(incoming.quiz).forEach(function (k) {
       if (!state.quiz[k] || incoming.updated > state.updated) state.quiz[k] = incoming.quiz[k];
     });
+    Object.keys(incoming.cards).forEach(function (k) {
+      if (!state.cards[k] || incoming.updated > state.updated) state.cards[k] = incoming.cards[k];
+    });
     save();
     render();
     toast(added ? "Added " + added + (added === 1 ? " tick" : " ticks") : "No new ticks in that code. Dates were updated.");
@@ -689,7 +843,7 @@
   });
 
   view.addEventListener("click", function (e) {
-    var b = e.target.closest("button[data-act]");
+    var b = e.target.closest("button[data-act], [role=\"button\"][data-act]");
     if (!b) return;
     var act = b.getAttribute("data-act");
     if (act === "tab") go(b.getAttribute("data-tab"));
@@ -701,6 +855,48 @@
       installEvent.userChoice.then(function () { installEvent = null; render(); }, function () {});
     }
     else if (act === "quiz") openQuiz(b.getAttribute("data-id"));
+    else if (act === "cards-for") {
+      fc.course = b.getAttribute("data-c");
+      fc.range = "week";
+      fc.week = Number(b.getAttribute("data-w"));
+      fc.mode = "study";
+      fcResetDeck();
+      tab = "cards";
+      render({ top: true });
+    }
+    else if (act === "fc-course") { fc.course = b.getAttribute("data-v"); prefs.fcCourse = fc.course; savePrefs(); fcResetDeck(); render(); }
+    else if (act === "fc-range") {
+      fc.range = b.getAttribute("data-v");
+      if (fc.range !== "week") { fc.week = null; prefs.fcRange = fc.range; savePrefs(); }
+      fcResetDeck();
+      render();
+    }
+    else if (act === "fc-mode") { fc.mode = b.getAttribute("data-v"); prefs.fcMode = fc.mode; savePrefs(); render(); }
+    else if (act === "fc-flip") {
+      fc.flipped = !fc.flipped;
+      render();
+      var cardEl = view.querySelector(".fc-card");
+      if (cardEl) cardEl.focus({ preventScroll: true });
+    }
+    else if (act === "fc-mark") {
+      var cur = fcDeck()[fc.pos];
+      if (cur) { state.cards[cur.id] = b.getAttribute("data-v"); save(); }
+      fc.pos++;
+      fc.flipped = false;
+      render();
+    }
+    else if (act === "fc-next") fcStep(1);
+    else if (act === "fc-prev") fcStep(-1);
+    else if (act === "fc-shuffle") {
+      var ord = fc.order || [];
+      for (var si = ord.length - 1; si > 0; si--) { var sj = Math.floor(Math.random() * (si + 1)); var tmp = ord[si]; ord[si] = ord[sj]; ord[sj] = tmp; }
+      fc.pos = 0;
+      fc.flipped = false;
+      render();
+      toast("Cards shuffled");
+    }
+    else if (act === "fc-restart") { fcResetDeck(); render({ top: true }); }
+    else if (act === "fc-learning") { fc.order = null; fc.onlyLearning = true; render({ top: true }); }
     else if (act === "reveal") {
       var rq = b.getAttribute("data-q");
       quiz.shown[rq] = true;
@@ -750,9 +946,15 @@
     }
   });
 
+  view.addEventListener("keydown", function (e) {
+    var el = e.target.closest && e.target.closest('[role="button"][data-act]');
+    if (el && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); el.click(); }
+  });
+
   var sx = null, sy = null;
   view.addEventListener("touchstart", function (e) {
-    if (tab !== "week" || e.touches.length !== 1) { sx = null; return; }
+    var swipeable = tab === "week" || (tab === "cards" && fc.mode === "study");
+    if (!swipeable || e.touches.length !== 1) { sx = null; return; }
     sx = e.touches[0].clientX;
     sy = e.touches[0].clientY;
   }, { passive: true });
@@ -760,7 +962,10 @@
     if (sx === null) return;
     var dx = e.changedTouches[0].clientX - sx, dy = e.changedTouches[0].clientY - sy;
     sx = null;
-    if (Math.abs(dx) > 70 && Math.abs(dx) > Math.abs(dy) * 1.6) stepWeek(dx < 0 ? 1 : -1);
+    if (Math.abs(dx) > 70 && Math.abs(dx) > Math.abs(dy) * 1.6) {
+      if (tab === "cards") fcStep(dx < 0 ? 1 : -1);
+      else stepWeek(dx < 0 ? 1 : -1);
+    }
   }, { passive: true });
 
   window.addEventListener("beforeinstallprompt", function (e) {
