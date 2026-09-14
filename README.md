@@ -35,3 +35,7 @@ The Exams tab also has a cumulative practice final for each course (`practice-fi
 ## Timetable
 
 The Semester tab has a weekly class timetable. Add each class (course code, section, lecture/lab/seminar/tutorial, days, start and end time, room); it is shown as a week grid with a current-time line. Today's classes appear on the Week tab (accounting for fall break and the rescheduled Dec 3-4 days) and the first class is mentioned in the morning reminder. Timetables are stored on the device and can be moved with a timetable code (TT1-...).
+
+## Course illustrations
+
+`art.js` draws original SVG illustrations for each course that change with the week's topic (energy diagrams, galvanic cells, reaction mechanisms, DNA, membranes, the citric acid cycle, projectiles, forces, rotation and more). They appear on the Week cards, review-question and exam headers, and as course icons, and use the theme colours so they work in light and dark mode and offline.

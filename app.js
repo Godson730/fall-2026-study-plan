@@ -3,6 +3,7 @@
 
   var P = window.PLAN;
   var QUESTIONS = window.QUESTIONS || {};
+  var ART = window.COURSE_ART || { scene: function () { return ""; }, icon: function () { return ""; }, sceneName: function () { return ""; } };
   var COURSES = P.COURSES, WEEKS = P.WEEKS, EXAM = P.EXAM, SETUP = P.SETUP, EXAM_TASKS = P.EXAM_TASKS, BOOKS = P.BOOKS;
   var LS_STATE = "studyplan-state-v1";
   var LS_UI = "studyplan-ui-v1";
@@ -233,7 +234,7 @@
     COURSES.forEach(function (c) {
       var t = w.tasks[c.key], id = "w" + w.n + "-" + c.key;
       var reads = t.r.map(function (r) { return '<span><span class="book">' + esc(r[0]) + "</span>" + esc(r[1]) + "</span>"; }).join("");
-      h += '<li class="card ' + c.key + doneCls(id) + '"><label class="card-main">' +
+      h += '<li class="card ' + c.key + doneCls(id) + '"><div class="art card-art">' + ART.scene(c.key, w.n, true) + '</div><label class="card-main">' +
         '<span class="card-top"><span class="code"><i class="dot"></i>' + esc(c.code) + "</span>" +
         '<input type="checkbox" class="check" data-task="' + id + '"' + chk(id) + ' aria-label="Done: ' + esc(c.code + ", " + t.t) + '"></span>' +
         '<span class="topic">' + esc(t.t) + "</span>" +
@@ -267,7 +268,7 @@
       '<p class="big"><span class="big-n">' + countDone(ids) + '</span><span class="big-of">of ' + ids.length + " tasks</span></p><div class=\"bars\">";
     COURSES.forEach(function (c) {
       var cids = courseIds(c.key), d = countDone(cids);
-      h += '<div class="bar-row ' + c.key + '"><span class="code"><i class="dot"></i>' + esc(c.code) + "</span>" +
+      h += '<div class="bar-row ' + c.key + '"><span class="code"><span class="art bare icon-art sm">' + ART.icon(c.key) + '</span>' + esc(c.code) + "</span>" +
         '<span class="count">' + d + "/" + cids.length + "</span>" +
         '<span class="bar" role="img" aria-label="' + esc(c.code) + ": " + d + " of " + cids.length + ' done"><i style="width:' + Math.round(d / cids.length * 100) + '%"></i></span></div>';
     });
@@ -479,7 +480,7 @@
     var top = '<button type="button" class="iconbtn" data-act="quiz-back" aria-label="Back">' + ICON.left + "</button>" +
       '<div class="ab-mid"><h1 class="ab-title">Review questions</h1><p class="ab-sub">' + esc(c.code + " · Week " + w.n) + "</p></div><span></span>";
 
-    var h = '<section class="qhead ' + c.key + '"><span class="code"><i class="dot"></i>' + esc(c.code) + "</span>" +
+    var h = '<section class="qhead ' + c.key + '"><div class="art hero-art">' + ART.scene(c.key, w.n, false) + '</div><span class="code"><i class="dot"></i>' + esc(c.code) + "</span>" +
       '<h2 class="qtopic">' + esc(t.t) + "</h2>" +
       '<p class="qscore"><span><b>' + s.got + "</b> got it</span><span><b>" + s.again + "</b> to review again</span><span><b>" + (s.total - s.got - s.again) + "</b> not marked</span></p>" +
       '<p class="sub">Answer each question in your head or on paper before you check.</p></section>';
@@ -667,7 +668,7 @@
       '<button type="button" class="linkbtn" data-act="fc-shuffle">Shuffle</button></p>';
     h += '<div class="fc-card ' + card.c + (fc.flipped ? " is-flipped" : "") + '" role="button" tabindex="0" data-act="fc-flip" aria-label="' + (fc.flipped ? "Card showing the answer. Tap to see the prompt." : "Card showing the prompt. Tap to see the answer.") + '">' +
       '<div class="fc-inner">' +
-        '<div class="fc-face fc-front"' + (fc.flipped ? ' aria-hidden="true"' : "") + '><span class="code"><i class="dot"></i>' + esc(cc.code + " · Week " + card.w) + '</span><p class="fc-prompt">' + esc(card.f) + '</p><span class="fc-hint">Tap to flip</span></div>' +
+        '<div class="fc-face fc-front"' + (fc.flipped ? ' aria-hidden="true"' : "") + '><span class="art bare fc-icon">' + ART.icon(card.c) + '</span><span class="code"><i class="dot"></i>' + esc(cc.code + " · Week " + card.w) + '</span><p class="fc-prompt">' + esc(card.f) + '</p><span class="fc-hint">Tap to flip</span></div>' +
         '<div class="fc-face fc-back"' + (fc.flipped ? "" : ' aria-hidden="true"') + '><span class="code"><i class="dot"></i>' + esc(cc.code + " · Week " + card.w) + '</span><p class="fc-answer">' + lines(card.b) + "</p>" +
           (card.n ? '<p class="fc-note">' + esc(card.n) + "</p>" : '<span class="fc-hint">Tap to flip back</span>') + "</div>" +
       "</div></div>";
@@ -724,7 +725,7 @@
     } else status = "Not taken";
     var length = def.minutes >= 60 ? (def.minutes / 60) + " h" : def.minutes + " min";
     return '<button type="button" class="wrow" data-act="exam-open" data-c="' + id + '">' +
-      '<span class="n"><i class="dot ' + c.key + '"></i></span>' +
+      '<span class="n ' + c.key + '"><span class="art bare icon-art">' + ART.icon(c.key) + '</span></span>' +
       '<span><span class="d">' + esc(c.code) + '</span><span class="t">' + total + " marks · " + length + "</span></span>" +
       '<span class="right"><span class="exstat">' + esc(status) + "</span></span>" + ICON.right + "</button>";
   }
@@ -809,7 +810,7 @@
 
   function examIntro(def, key, c) {
     var total = examTotal(def), mc = mcCount(def), sa = def.questions.length - mc, d = drafts[key], atts = attemptsFor(key);
-    var h = '<section class="qhead ' + key + '"><span class="code"><i class="dot"></i>' + esc(c.code + " · " + c.name) + "</span>" +
+    var h = '<section class="qhead ' + c.key + '"><div class="art hero-art">' + ART.scene(c.key, def.kind === "final" ? 12 : 0, false) + '</div><span class="code"><i class="dot"></i>' + esc(c.code + " · " + c.name) + "</span>" +
       '<h2 class="qtopic">' + examLabel(def) + "</h2>" +
       '<p class="qscore"><span><b>' + def.questions.length + "</b> questions</span><span><b>" + total + "</b> marks</span><span><b>" + def.minutes + "</b> minutes</span></p></section>";
     h += '<section class="install"><h3>Covers</h3><p class="sub">' + esc(def.covers) + "</p>" +
