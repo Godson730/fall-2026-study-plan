@@ -53,7 +53,27 @@
         });
       });
     }
-    return { v: 1, updated: Number(s.updated) || 0, done: done, dates: dates, quiz: quizMarks, cards: cardMarks, exams: examsSaved };
+    var ttList = [];
+    if (Array.isArray(s.timetable)) {
+      s.timetable.slice(0, 60).forEach(function (c) {
+        if (!c || typeof c !== "object") return;
+        var code = String(c.code || "").trim().toUpperCase().slice(0, 20);
+        var tre = /^([01]\d|2[0-3]):[0-5]\d$/;
+        var ds = Array.isArray(c.days) ? c.days.filter(function (d, i, arr) { return typeof d === "number" && d >= 0 && d <= 6 && d % 1 === 0 && arr.indexOf(d) === i; }) : [];
+        if (!code || !ds.length || !tre.test(c.s) || !tre.test(c.e) || c.e <= c.s) return;
+        ttList.push({
+          id: /^[a-z0-9]{1,24}$/i.test(c.id) ? c.id : "c" + Math.random().toString(36).slice(2, 9),
+          code: code,
+          sec: String(c.sec || "").trim().slice(0, 10),
+          type: ["LEC", "LAB", "SEM", "TUT"].indexOf(c.type) >= 0 ? c.type : "LEC",
+          days: ds.sort(),
+          s: c.s,
+          e: c.e,
+          room: String(c.room || "").trim().slice(0, 40)
+        });
+      });
+    }
+    return { v: 1, updated: Number(s.updated) || 0, done: done, dates: dates, quiz: quizMarks, cards: cardMarks, exams: examsSaved, timetable: ttList };
   }
 
   var state;
@@ -207,6 +227,7 @@
       h += '<p class="nextup"><span>Add your midterm and exam dates to see a countdown.</span><button type="button" class="linkbtn" data-act="tab" data-tab="exams">Add dates</button></p>';
     }
     h += "</section>";
+    if (isNow) h += todayClasses();
 
     h += '<ul class="cards" aria-label="Tasks">';
     COURSES.forEach(function (c) {
@@ -242,7 +263,7 @@
 
   function semesterTab() {
     var ids = allIds(), ni = nowIndex();
-    var h = '<section class="summary" aria-label="Progress"><p class="label">Done so far</p>' +
+    var h = timetableSection() + '<section class="summary" aria-label="Progress"><p class="label">Done so far</p>' +
       '<p class="big"><span class="big-n">' + countDone(ids) + '</span><span class="big-of">of ' + ids.length + " tasks</span></p><div class=\"bars\">";
     COURSES.forEach(function (c) {
       var cids = courseIds(c.key), d = countDone(cids);
@@ -375,7 +396,7 @@
 
   /* ---------- render ---------- */
 
-  var TABS = { week: weekTab, semester: semesterTab, cards: cardsTab, exams: examsTab, guide: guideTab, quiz: quizTab, exam: examTab };
+  var TABS = { week: weekTab, semester: semesterTab, cards: cardsTab, exams: examsTab, guide: guideTab, quiz: quizTab, exam: examTab, ttedit: ttEditTab };
 
   function render(opts) {
     var r = TABS[tab]();
@@ -383,7 +404,7 @@
     bar.innerHTML = r.top;
     view.innerHTML = r.body;
     document.querySelectorAll(".tab").forEach(function (b) {
-      if (b.getAttribute("data-tab") === (tab === "quiz" ? quiz.from : tab === "exam" ? "exams" : tab)) b.setAttribute("aria-current", "page");
+      if (b.getAttribute("data-tab") === (tab === "quiz" ? quiz.from : tab === "exam" ? "exams" : tab === "ttedit" ? "semester" : tab)) b.setAttribute("aria-current", "page");
       else b.removeAttribute("aria-current");
     });
     if (opts && opts.top) window.scrollTo(0, 0);
@@ -908,6 +929,228 @@
     return h;
   }
 
+  /* ---------- timetable ---------- */
+
+  var TT_TYPES = [["LEC", "Lecture"], ["LAB", "Lab"], ["SEM", "Seminar"], ["TUT", "Tutorial"]];
+  var DAY3 = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  var DAY_FULL = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+  var TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+  var tt = { form: null, confirmDelete: false, pasteOpen: false, error: "" };
+
+  function toMin(t) { var p = t.split(":"); return +p[0] * 60 + +p[1]; }
+  function clock(m) {
+    var h = Math.floor(m / 60), mm = m % 60, h12 = h % 12 || 12;
+    return h12 + ":" + (mm < 10 ? "0" : "") + mm + (h < 12 ? " a.m." : " p.m.");
+  }
+  function hourLabel(h) { var h12 = h % 12 || 12; return h12 + (h < 12 ? "am" : "pm"); }
+  function typeName(code) { var t = TT_TYPES.filter(function (x) { return x[0] === code; })[0]; return t ? t[1] : code; }
+  function isoOf(d) { return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); }
+
+  /* Which weekday’s classes run on a date: -1 when there are no classes (outside term, fall break). */
+  function classDay(d) {
+    var iso = isoOf(d);
+    if (iso < WEEKS[0].start || iso > "2026-12-04" || iso === "2026-10-12" || iso === "2026-10-13") return -1;
+    if (iso === "2026-12-03") return 2;
+    if (iso === "2026-12-04") return 1;
+    return d.getDay();
+  }
+
+  function meetingsOn(dow) {
+    return state.timetable.filter(function (c) { return c.days.indexOf(dow) >= 0; })
+      .sort(function (a, b) { return a.s < b.s ? -1 : a.s > b.s ? 1 : 0; });
+  }
+
+  function ttGrid() {
+    var list = state.timetable;
+    var weekend = list.some(function (c) { return c.days.indexOf(0) >= 0 || c.days.indexOf(6) >= 0; });
+    var days = weekend ? [0, 1, 2, 3, 4, 5, 6] : [1, 2, 3, 4, 5];
+    var minS = Math.min.apply(null, list.map(function (c) { return toMin(c.s); }));
+    var maxE = Math.max.apply(null, list.map(function (c) { return toMin(c.e); }));
+    var startH = Math.min(8, Math.floor(minS / 60)), endH = Math.max(17, Math.ceil(maxE / 60));
+    var pph = 44, now = new Date(), todayDow = classDay(now), nowMin = now.getHours() * 60 + now.getMinutes();
+
+    var h = '<div class="tt" style="--days:' + days.length + ";--pph:" + pph + 'px">';
+    h += '<div class="tt-head" aria-hidden="true"><span></span>' + days.map(function (d) {
+      return "<span" + (d === todayDow ? ' class="today"' : "") + ">" + DAY3[d] + "</span>";
+    }).join("") + "</div>";
+    h += '<div class="tt-body" style="height:' + (endH - startH) * pph + 'px">';
+    h += '<div class="tt-axis" aria-hidden="true">';
+    for (var hr = startH; hr < endH; hr++) h += '<span class="tt-hour" style="top:' + (hr - startH) * pph + 'px">' + hourLabel(hr) + "</span>";
+    h += "</div>";
+    days.forEach(function (d) {
+      var items = meetingsOn(d), laneEnds = [];
+      var placed = items.map(function (c) {
+        var s = toMin(c.s), lane = 0;
+        while (lane < laneEnds.length && laneEnds[lane] > s) lane++;
+        laneEnds[lane] = toMin(c.e);
+        return { c: c, lane: lane };
+      });
+      var lanes = Math.max(1, laneEnds.length);
+      h += '<div class="tt-col">';
+      placed.forEach(function (p) {
+        var c = p.c, s = toMin(c.s), e = toMin(c.e);
+        var top = (s - startH * 60) / 60 * pph, height = Math.max(18, (e - s) / 60 * pph - 2);
+        var w = 100 / lanes;
+        h += '<button type="button" class="tt-block ' + c.type + '" data-act="tt-edit" data-id="' + esc(c.id) + '" ' +
+          'style="top:' + top.toFixed(1) + "px;height:" + height.toFixed(1) + "px;left:calc(" + (p.lane * w).toFixed(3) + "% + 2px);width:calc(" + w.toFixed(3) + '% - 4px)" ' +
+          'aria-label="' + esc(c.code + " " + typeName(c.type) + ", " + DAY_FULL[d] + " " + clock(s) + " to " + clock(e) + (c.room ? ", " + c.room : "") + ", edit") + '">' +
+          '<span class="tt-code">' + esc(c.code.split("*")[0]) + '</span><span class="tt-type">' + esc((c.code.split("*")[1] || "") + " " + c.type) + "</span></button>";
+      });
+      if (d === todayDow && nowMin >= startH * 60 && nowMin <= endH * 60) {
+        h += '<i class="tt-now" style="top:' + ((nowMin - startH * 60) / 60 * pph).toFixed(1) + 'px" aria-hidden="true"></i>';
+      }
+      h += "</div>";
+    });
+    return h + "</div></div>";
+  }
+
+  function ttCode() { return "TT1-" + btoa(unescape(encodeURIComponent(JSON.stringify(state.timetable)))); }
+  function ttRead(str) {
+    str = String(str || "").replace(/\s+/g, "");
+    if (str.indexOf("TT1-") !== 0) return null;
+    try {
+      var list = norm({ timetable: JSON.parse(decodeURIComponent(escape(atob(str.slice(4))))) }).timetable;
+      return list.length ? list : null;
+    } catch (e) { return null; }
+  }
+
+  function timetableSection() {
+    var list = state.timetable;
+    var h = '<section class="section" aria-labelledby="h-tt"><div class="sec-row"><h2 id="h-tt">Timetable</h2>' +
+      (list.length ? '<button type="button" class="btn small" data-act="tt-add">Add class</button>' : "") + "</div>";
+    if (!list.length) {
+      h += '<div class="tt-empty"><p class="sub">Add your classes to see your week at a glance. Today’s classes will also show on the Week tab and in your morning reminder.</p>' +
+        '<div class="btns"><button type="button" class="btn" data-act="tt-add">Add your first class</button>' +
+        '<button type="button" class="btn ghost" data-act="tt-paste">Paste a timetable code</button></div></div>';
+    } else {
+      h += ttGrid();
+      h += '<p class="tt-legend">' + TT_TYPES.filter(function (t) {
+        return list.some(function (c) { return c.type === t[0]; });
+      }).map(function (t) { return '<span><i class="tt-swatch ' + t[0] + '"></i>' + t[1] + "</span>"; }).join("") +
+        '<span class="sub">Tap a class to edit it</span></p>';
+      h += '<details class="tt-all"><summary>All classes (' + list.length + ")</summary><div class=\"weeks\">";
+      list.slice().sort(function (a, b) { return a.code < b.code ? -1 : a.code > b.code ? 1 : a.type < b.type ? -1 : 1; }).forEach(function (c) {
+        var daysTxt = [1, 2, 3, 4, 5, 6, 0].filter(function (d) { return c.days.indexOf(d) >= 0; }).map(function (d) { return DAY3[d]; }).join(", ");
+        h += '<button type="button" class="wrow" data-act="tt-edit" data-id="' + esc(c.id) + '">' +
+          '<span class="n"><i class="tt-swatch ' + c.type + '"></i></span>' +
+          '<span><span class="d">' + esc(c.code + (c.sec ? "*" + c.sec : "") + " " + c.type) + '</span><span class="t">' + esc(daysTxt + " · " + clock(toMin(c.s)) + "–" + clock(toMin(c.e)) + (c.room ? " · " + c.room : "")) + "</span></span>" +
+          '<span class="right"></span>' + ICON.right + "</button>";
+      });
+      h += "</div></details>";
+      h += '<div class="btns"><button type="button" class="linkbtn" data-act="tt-copy">Copy timetable code</button><button type="button" class="linkbtn" data-act="tt-paste">' + (tt.pasteOpen ? "Hide code box" : "Paste a timetable code") + "</button></div>";
+    }
+    if (tt.pasteOpen) {
+      h += '<div class="tt-paste"><label class="label" for="tt-code-in">Timetable code</label>' +
+        '<textarea id="tt-code-in" spellcheck="false" autocomplete="off" placeholder="TT1-…"></textarea>' +
+        '<div class="btns"><button type="button" class="btn" data-act="tt-import">' + (list.length ? "Replace my " + list.length + (list.length === 1 ? " class" : " classes") : "Load timetable") + "</button></div></div>";
+    }
+    return h + "</section>";
+  }
+
+  function todayClasses() {
+    if (!state.timetable.length) return "";
+    var now = new Date(), iso = isoOf(now), dow = classDay(now), nowMin = now.getHours() * 60 + now.getMinutes();
+    if (dow < 0) {
+      if (iso === "2026-10-12" || iso === "2026-10-13") return '<p class="nextup"><span>Fall break: no classes today.</span></p>';
+      return "";
+    }
+    var list = meetingsOn(dow);
+    var note = iso === "2026-12-03" ? " (Tuesday schedule)" : iso === "2026-12-04" ? " (Monday schedule)" : "";
+    if (!list.length) return '<p class="nextup"><span>No classes today' + note + '.</span><button type="button" class="linkbtn" data-act="tab" data-tab="semester">Timetable</button></p>';
+    var nextMarked = false;
+    var h = '<section class="tc" aria-labelledby="h-tc"><p class="label" id="h-tc">Today’s classes' + note + '</p><ul class="tc-list">';
+    list.forEach(function (c) {
+      var s = toMin(c.s), e = toMin(c.e), tag = "", cls = "";
+      if (nowMin >= s && nowMin < e) tag = '<span class="tc-tag">Now</span>';
+      else if (nowMin >= e) cls = ' class="past"';
+      else if (!nextMarked) { tag = '<span class="tc-tag next">Next</span>'; nextMarked = true; }
+      if (nowMin >= s && nowMin < e) nextMarked = true;
+      h += "<li" + cls + '><span class="tc-time">' + clock(s) + "<br>" + clock(e) + "</span>" +
+        '<span class="tc-what"><i class="tt-swatch ' + c.type + '"></i>' + esc(c.code + " " + typeName(c.type)) +
+        (c.room ? '<span class="tc-room">' + esc(c.room) + "</span>" : "") + "</span>" + tag + "</li>";
+    });
+    return h + "</ul></section>";
+  }
+
+  function ttOpenForm(id) {
+    var c = id ? state.timetable.filter(function (x) { return x.id === id; })[0] : null;
+    tt.form = c ? JSON.parse(JSON.stringify(c)) : { id: null, code: "", sec: "", type: "LEC", days: [], s: "", e: "", room: "" };
+    tt.error = "";
+    tt.confirmDelete = false;
+    tab = "ttedit";
+    render({ top: true });
+  }
+
+  function ttClose() {
+    tt.form = null;
+    tab = "semester";
+    render({ top: true });
+  }
+
+  function ttEditTab() {
+    var f = tt.form;
+    if (!f) { tab = "semester"; return semesterTab(); }
+    var top = '<button type="button" class="iconbtn" data-act="tt-cancel" aria-label="Cancel">' + ICON.left + "</button>" +
+      '<div class="ab-mid"><h1 class="ab-title">' + (f.id ? "Edit class" : "Add class") + '</h1><p class="ab-sub">Fall 2026 timetable</p></div><span></span>';
+    function pressed(on) { return ' aria-pressed="' + on + '"'; }
+    var h = '<form class="ttform" data-form="tt" novalidate>' +
+      '<label class="field"><span class="label">Course code</span><input type="text" data-tt="code" value="' + esc(f.code) + '" placeholder="BIOC*2580" autocapitalize="characters" autocomplete="off" spellcheck="false"></label>' +
+      '<div class="field-row">' +
+        '<label class="field"><span class="label">Section <i>(optional)</i></span><input type="text" data-tt="sec" value="' + esc(f.sec) + '" placeholder="0227" autocomplete="off"></label>' +
+        '<label class="field"><span class="label">Room <i>(optional)</i></span><input type="text" data-tt="room" value="' + esc(f.room) + '" placeholder="MCKN 120" autocapitalize="characters" autocomplete="off"></label>' +
+      "</div>" +
+      '<div class="field"><span class="label" id="tt-type-l">Type</span><div class="seg" role="group" aria-labelledby="tt-type-l">' +
+        TT_TYPES.map(function (t) { return '<button type="button" data-act="tt-type" data-v="' + t[0] + '"' + pressed(f.type === t[0]) + ">" + t[1] + "</button>"; }).join("") +
+      "</div></div>" +
+      '<div class="field"><span class="label" id="tt-days-l">Days</span><div class="daychips" role="group" aria-labelledby="tt-days-l">' +
+        [1, 2, 3, 4, 5, 6, 0].map(function (d) { return '<button type="button" data-act="tt-day" data-v="' + d + '" aria-label="' + DAY_FULL[d] + '"' + pressed(f.days.indexOf(d) >= 0) + ">" + DAY3[d] + "</button>"; }).join("") +
+      "</div></div>" +
+      '<div class="field-row">' +
+        '<label class="field"><span class="label">Starts</span><input type="time" data-tt="s" value="' + esc(f.s) + '" step="300"></label>' +
+        '<label class="field"><span class="label">Ends</span><input type="time" data-tt="e" value="' + esc(f.e) + '" step="300"></label>' +
+      "</div>" +
+      '<p class="form-error" role="alert">' + esc(tt.error) + "</p>" +
+      '<div class="btns"><button type="submit" class="btn">Save class</button><button type="button" class="btn ghost" data-act="tt-cancel">Cancel</button></div>' +
+      (f.id ? '<div class="btns"><button type="button" class="linkbtn danger" data-act="tt-delete">' + (tt.confirmDelete ? "Tap again to delete this class" : "Delete this class") + "</button></div>" : "") +
+      "</form>";
+    return { top: top, body: h, plain: false };
+  }
+
+  function ttSave() {
+    var f = tt.form;
+    if (!f) return;
+    var code = f.code.trim().toUpperCase();
+    var err = !code ? "Enter the course code, for example BIOC*2580."
+      : !f.days.length ? "Pick at least one day."
+      : (!TIME_RE.test(f.s) || !TIME_RE.test(f.e)) ? "Enter both a start time and an end time."
+      : f.e <= f.s ? "The end time needs to be later than the start time." : "";
+    if (err) {
+      tt.error = err;
+      var fe = view.querySelector(".form-error");
+      if (fe) fe.textContent = err;
+      return;
+    }
+    var entry = { id: f.id || "c" + Date.now().toString(36), code: code, sec: f.sec.trim(), type: f.type, days: f.days.slice().sort(), s: f.s, e: f.e, room: f.room.trim() };
+    var i = state.timetable.map(function (c) { return c.id; }).indexOf(entry.id);
+    if (i >= 0) state.timetable[i] = entry; else state.timetable.push(entry);
+    save();
+    ttClose();
+    toast(f.id ? "Class updated" : "Class added");
+  }
+
+  function ttCopy() {
+    var code = ttCode();
+    function fallback() {
+      tt.pasteOpen = true;
+      render();
+      var box = document.getElementById("tt-code-in");
+      if (box) { box.value = code; box.focus(); box.select(); }
+      toast("Select the code in the box and copy it.");
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(code).then(function () { toast("Timetable code copied"); }, fallback);
+    else fallback();
+  }
+
   /* ---------- daily reminders ---------- */
 
   var CFG = window.REMINDER_CONFIG || {};
@@ -1031,7 +1274,7 @@
   /* ---------- progress codes ---------- */
 
   function makeCode() {
-    var payload = JSON.stringify({ d: Object.keys(state.done), t: state.dates, q: state.quiz, k: state.cards, x: state.exams, u: state.updated });
+    var payload = JSON.stringify({ d: Object.keys(state.done), t: state.dates, q: state.quiz, k: state.cards, x: state.exams, tt: state.timetable, u: state.updated });
     return "SP1-" + btoa(unescape(encodeURIComponent(payload)));
   }
   function readCode(str) {
@@ -1041,7 +1284,7 @@
       var o = JSON.parse(decodeURIComponent(escape(atob(str.slice(4)))));
       var done = {};
       (Array.isArray(o.d) ? o.d : []).forEach(function (k) { done[k] = true; });
-      return norm({ done: done, dates: o.t, quiz: o.q, cards: o.k, exams: o.x, updated: o.u });
+      return norm({ done: done, dates: o.t, quiz: o.q, cards: o.k, exams: o.x, timetable: o.tt, updated: o.u });
     } catch (e) { return null; }
   }
 
@@ -1082,6 +1325,7 @@
     Object.keys(incoming.cards).forEach(function (k) {
       if (!state.cards[k] || incoming.updated > state.updated) state.cards[k] = incoming.cards[k];
     });
+    if (incoming.timetable.length && (!state.timetable.length || incoming.updated > state.updated)) state.timetable = incoming.timetable;
     Object.keys(incoming.exams).forEach(function (k) {
       var mine = state.exams[k] || [], seen = mine.map(function (a) { return a.at; });
       var merged = mine.concat(incoming.exams[k].filter(function (a) { return seen.indexOf(a.at) < 0; }));
@@ -1107,6 +1351,7 @@
     if (act === "prev") stepWeek(-1);
     if (act === "next") stepWeek(1);
     if (act === "exam-back") { tab = "exams"; render({ top: true }); }
+    if (act === "tt-cancel") ttClose();
     if (act === "quiz-back") {
       if (quiz.from === "week") weekIdx = Number(quiz.id.split("-")[0].slice(1)) - 1;
       tab = quiz.from;
@@ -1128,6 +1373,41 @@
     }
     else if (act === "quiz") openQuiz(b.getAttribute("data-id"));
     else if (act === "exam-open") openExam(b.getAttribute("data-c"));
+    else if (act === "tt-add") ttOpenForm(null);
+    else if (act === "tt-edit") ttOpenForm(b.getAttribute("data-id"));
+    else if (act === "tt-cancel") ttClose();
+    else if (act === "tt-type" && tt.form) {
+      tt.form.type = b.getAttribute("data-v");
+      b.parentNode.querySelectorAll("button").forEach(function (o) { o.setAttribute("aria-pressed", String(o === b)); });
+    }
+    else if (act === "tt-day" && tt.form) {
+      var dv = Number(b.getAttribute("data-v")), di = tt.form.days.indexOf(dv);
+      if (di >= 0) tt.form.days.splice(di, 1); else tt.form.days.push(dv);
+      b.setAttribute("aria-pressed", String(di < 0));
+    }
+    else if (act === "tt-delete" && tt.form) {
+      if (!tt.confirmDelete) { tt.confirmDelete = true; b.textContent = "Tap again to delete this class"; }
+      else {
+        var delId = tt.form.id;
+        state.timetable = state.timetable.filter(function (c) { return c.id !== delId; });
+        save();
+        ttClose();
+        toast("Class deleted");
+      }
+    }
+    else if (act === "tt-copy") ttCopy();
+    else if (act === "tt-paste") { tt.pasteOpen = !tt.pasteOpen; render(); var tb = document.getElementById("tt-code-in"); if (tb) tb.focus(); }
+    else if (act === "tt-import") {
+      var tbox = document.getElementById("tt-code-in"), loaded = ttRead(tbox && tbox.value);
+      if (!loaded) { toast("That isn’t a timetable code. It should start with TT1-."); }
+      else {
+        state.timetable = loaded;
+        save();
+        tt.pasteOpen = false;
+        render();
+        toast("Timetable loaded: " + loaded.length + (loaded.length === 1 ? " class" : " classes"));
+      }
+    }
     else if (act === "exam-start") startExam(b.getAttribute("data-timed") === "1");
     else if (act === "exam-continue") { ex.view = "taking"; render({ top: true }); }
     else if (act === "exam-discard") {
@@ -1260,10 +1540,19 @@
 
   view.addEventListener("input", function (e) {
     var t = e.target;
+    if (t.matches && t.matches("input[data-tt]") && tt.form) {
+      tt.form[t.getAttribute("data-tt")] = t.value;
+      if (tt.error) { tt.error = ""; var fe = view.querySelector(".form-error"); if (fe) fe.textContent = ""; }
+      return;
+    }
     if (t.matches && t.matches("textarea[data-note]") && drafts[ex.course]) {
       drafts[ex.course].notes[t.getAttribute("data-note")] = t.value;
       saveDrafts();
     }
+  });
+
+  view.addEventListener("submit", function (e) {
+    if (e.target.matches && e.target.matches('[data-form="tt"]')) { e.preventDefault(); ttSave(); }
   });
 
   view.addEventListener("keydown", function (e) {
@@ -1296,7 +1585,7 @@
   window.addEventListener("appinstalled", function () { installEvent = null; render(); });
 
   document.addEventListener("visibilitychange", function () {
-    if (document.visibilityState === "visible" && tab !== "guide" && tab !== "exam") render();
+    if (document.visibilityState === "visible" && tab !== "guide" && tab !== "exam" && tab !== "ttedit") render();
   });
 
   render();

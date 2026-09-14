@@ -7,6 +7,19 @@
   var DAY_PLAN = { 1: ["c1050", "c1500"], 2: ["c2700", "c2580"], 3: ["c1050", "c1500"], 4: ["c2700", "c2580"], 5: "catch-up", 6: ["c1500", "c2580"], 0: "review" };
 
   function day(iso) { var p = iso.split("-"); return new Date(+p[0], +p[1] - 1, +p[2]); }
+  function pad(n) { return (n < 10 ? "0" : "") + n; }
+  function clock(t) {
+    var p = t.split(":"), h = +p[0], h12 = h % 12 || 12;
+    return h12 + ":" + p[1] + (h < 12 ? " a.m." : " p.m.");
+  }
+  /* Weekday whose classes run on this date, or -1 when there are none (outside term, fall break). */
+  function classDay(t) {
+    var iso = t.getFullYear() + "-" + pad(t.getMonth() + 1) + "-" + pad(t.getDate());
+    if (iso < "2026-09-10" || iso > "2026-12-04" || iso === "2026-10-12" || iso === "2026-10-13") return -1;
+    if (iso === "2026-12-03") return 2;
+    if (iso === "2026-12-04") return 1;
+    return t.getDay();
+  }
 
   root.buildReminder = function (plan, saved, now) {
     var done = (saved && saved.done) || {};
@@ -47,6 +60,13 @@
     }
 
     var weekDone = courses.filter(function (c) { return done["w" + w.n + "-" + c.key]; }).length;
+    var firstClass = "";
+    if (saved && Array.isArray(saved.timetable)) {
+      var cd = classDay(t);
+      var todays = saved.timetable.filter(function (c) { return c && Array.isArray(c.days) && c.days.indexOf(cd) >= 0; })
+        .sort(function (a, b) { return a.s < b.s ? -1 : 1; });
+      if (todays.length) firstClass = "First class " + clock(todays[0].s) + ": " + todays[0].code + " " + todays[0].type + ". ";
+    }
     var today = DAY_PLAN[t.getDay()];
     var body;
     if (Array.isArray(today)) {
@@ -62,6 +82,6 @@
     } else {
       body = "Sunday review: go over the last two weeks, then read next week’s topics.";
     }
-    return { title: "Week " + w.n + " · " + DAY_NAMES[t.getDay()], body: heads + body + " " + weekDone + " of 4 done this week." };
+    return { title: "Week " + w.n + " · " + DAY_NAMES[t.getDay()], body: heads + firstClass + body + " " + weekDone + " of 4 done this week." };
   };
 })(typeof self !== "undefined" ? self : this);

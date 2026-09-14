@@ -31,3 +31,7 @@ The Exams tab has a practice midterm for each course covering weeks 1-6 (`practi
 ## Practice finals
 
 The Exams tab also has a cumulative practice final for each course (`practice-finals.js`): weeks 1-12, weighted toward weeks 7-12, with 20 multiple-choice questions and 4 written questions (40 marks, 2 hours). After week 6 the finals are listed above the midterms.
+
+## Timetable
+
+The Semester tab has a weekly class timetable. Add each class (course code, section, lecture/lab/seminar/tutorial, days, start and end time, room); it is shown as a week grid with a current-time line. Today's classes appear on the Week tab (accounting for fall break and the rescheduled Dec 3-4 days) and the first class is mentioned in the morning reminder. Timetables are stored on the device and can be moved with a timetable code (TT1-...).
