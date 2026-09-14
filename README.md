@@ -15,3 +15,7 @@ A GitHub Actions job (`.github/workflows/reminders.yml`) wakes each subscribed p
 3. To test, run the "Daily reminder" workflow manually from the Actions tab.
 
 iPhone needs the app added to the Home Screen (iOS 16.4 or later).
+
+## Review questions
+
+Every weekly topic has five review questions with worked answers (`questions.js`). Open them from the **Review questions** button on each Week card, mark each one Got it or Review again, and find the ones to redo in the Semester tab.

@@ -222,6 +222,31 @@ textarea{width:100%;min-height:92px;resize:vertical;font:400 13px/1.45 var(--mon
 .kv{font:500 13px var(--mono);background:var(--sunk);color:var(--ink);border-radius:4px;padding:1px 5px}
 a.btn{text-decoration:none}
 
+/* review questions */
+li.card{cursor:default}
+.card-main{display:grid;gap:7px;cursor:pointer}
+.quiz-btn{display:flex;align-items:center;gap:10px;width:100%;margin-top:4px;padding:11px 0 0;border:0;border-top:1px dashed var(--rule);background:none;text-align:left;font:600 14.5px var(--sans);color:var(--ink)}
+.quiz-btn .qmeta{margin-left:auto;font:500 12.5px var(--mono);color:var(--ink-3);white-space:nowrap}
+.quiz-btn svg{width:16px;height:16px;flex:none;fill:none;stroke:var(--ink-3);stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.qhead{display:grid;gap:8px}
+.qtopic{font:600 24px/1.2 var(--serif);letter-spacing:-.01em}
+.qscore{display:flex;flex-wrap:wrap;gap:4px 16px;font:400 13px var(--mono);color:var(--ink-2)}
+.qscore b{font-weight:600;color:var(--ink)}
+.qlist{display:grid;gap:10px}
+.q{display:grid;gap:12px;background:var(--surface);border:1px solid var(--rule);border-radius:14px;padding:14px}
+.qtext{display:grid;grid-template-columns:24px minmax(0,1fr);gap:8px;font-size:16px;line-height:1.5}
+.qn{font:600 18px/1.35 var(--serif);color:var(--ink-3)}
+.answer{display:grid;gap:4px;margin-left:32px;padding:10px 12px;background:var(--sunk);border-radius:10px}
+.answer p{font-size:15px;line-height:1.55}
+.qbtns{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-left:32px}
+.qbtns .btn{min-height:42px;padding:8px 14px;font-size:14.5px}
+.qmark{min-height:42px;padding:8px 14px;border-radius:10px;border:1px solid var(--rule);background:transparent;font:600 14.5px var(--sans)}
+.qmark.got.on{background:var(--c2580);border-color:var(--c2580);color:var(--surface)}
+.qmark.again.on{background:var(--c1500);border-color:var(--c1500);color:var(--surface)}
+.qchip{font:500 11px/1 var(--mono);letter-spacing:.06em;text-transform:uppercase;border:1px solid currentColor;border-radius:5px;padding:5px 7px}
+.qchip.got{color:var(--c2580)}
+.qchip.again{color:var(--c1500)}
+
 @media (prefers-reduced-motion: reduce){
   *{transition:none!important;animation:none!important;scroll-behavior:auto!important}
 }

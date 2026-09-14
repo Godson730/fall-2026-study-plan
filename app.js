@@ -2,6 +2,7 @@
   "use strict";
 
   var P = window.PLAN;
+  var QUESTIONS = window.QUESTIONS || {};
   var COURSES = P.COURSES, WEEKS = P.WEEKS, EXAM = P.EXAM, SETUP = P.SETUP, EXAM_TASKS = P.EXAM_TASKS, BOOKS = P.BOOKS;
   var LS_STATE = "studyplan-state-v1";
   var LS_UI = "studyplan-ui-v1";
@@ -22,7 +23,13 @@
         if (/^c\d{4}-(mid|final)$/.test(k) && DATE_RE.test(s.dates[k])) dates[k] = s.dates[k];
       });
     }
-    return { v: 1, updated: Number(s.updated) || 0, done: done, dates: dates };
+    var quizMarks = {};
+    if (s.quiz && typeof s.quiz === "object") {
+      Object.keys(s.quiz).forEach(function (k) {
+        if (/^w\d{1,2}-c\d{4}-q\d{1,2}$/.test(k) && (s.quiz[k] === "got" || s.quiz[k] === "again")) quizMarks[k] = s.quiz[k];
+      });
+    }
+    return { v: 1, updated: Number(s.updated) || 0, done: done, dates: dates, quiz: quizMarks };
   }
 
   var state;
@@ -181,13 +188,13 @@
     COURSES.forEach(function (c) {
       var t = w.tasks[c.key], id = "w" + w.n + "-" + c.key;
       var reads = t.r.map(function (r) { return '<span><span class="book">' + esc(r[0]) + "</span>" + esc(r[1]) + "</span>"; }).join("");
-      h += '<li><label class="card ' + c.key + doneCls(id) + '">' +
+      h += '<li class="card ' + c.key + doneCls(id) + '"><label class="card-main">' +
         '<span class="card-top"><span class="code"><i class="dot"></i>' + esc(c.code) + "</span>" +
         '<input type="checkbox" class="check" data-task="' + id + '"' + chk(id) + ' aria-label="Done: ' + esc(c.code + ", " + t.t) + '"></span>' +
         '<span class="topic">' + esc(t.t) + "</span>" +
         '<span class="reads">' + reads + "</span>" +
         '<span class="do"><span class="label">Practise</span>' + esc(t.d) + "</span>" +
-        "</label></li>";
+        "</label>" + quizButton(id) + "</li>";
     });
     h += "</ul>";
 
@@ -220,6 +227,8 @@
         '<span class="bar" role="img" aria-label="' + esc(c.code) + ": " + d + " of " + cids.length + ' done"><i style="width:' + Math.round(d / cids.length * 100) + '%"></i></span></div>';
     });
     h += "</div></section>";
+
+    h += reviewSection();
 
     h += '<section class="section"><h2>Weeks</h2><div class="weeks">';
     WEEKS.forEach(function (w, i) {
@@ -342,7 +351,7 @@
 
   /* ---------- render ---------- */
 
-  var TABS = { week: weekTab, semester: semesterTab, exams: examsTab, guide: guideTab };
+  var TABS = { week: weekTab, semester: semesterTab, exams: examsTab, guide: guideTab, quiz: quizTab };
 
   function render(opts) {
     var r = TABS[tab]();
@@ -350,7 +359,7 @@
     bar.innerHTML = r.top;
     view.innerHTML = r.body;
     document.querySelectorAll(".tab").forEach(function (b) {
-      if (b.getAttribute("data-tab") === tab) b.setAttribute("aria-current", "page");
+      if (b.getAttribute("data-tab") === (tab === "quiz" ? quiz.from : tab)) b.setAttribute("aria-current", "page");
       else b.removeAttribute("aria-current");
     });
     if (opts && opts.top) window.scrollTo(0, 0);
@@ -377,6 +386,110 @@
     t.hidden = false;
     clearTimeout(toastTimer);
     toastTimer = setTimeout(function () { t.hidden = true; }, 3200);
+  }
+
+  /* ---------- review questions ---------- */
+
+  var quiz = { id: null, from: "week", shown: {} };
+
+  function quizStats(taskId) {
+    var qs = QUESTIONS[taskId] || [], got = 0, again = 0;
+    qs.forEach(function (_, i) {
+      var m = state.quiz[taskId + "-q" + (i + 1)];
+      if (m === "got") got++;
+      else if (m === "again") again++;
+    });
+    return { total: qs.length, got: got, again: again };
+  }
+
+  function quizButton(taskId) {
+    var s = quizStats(taskId);
+    if (!s.total) return "";
+    var detail = (s.got || s.again)
+      ? s.got + " of " + s.total + " got" + (s.again ? " · " + s.again + " to redo" : "")
+      : s.total + " questions";
+    return '<button type="button" class="quiz-btn" data-act="quiz" data-id="' + taskId + '"><span>Review questions</span><span class="qmeta">' + detail + "</span>" + ICON.right + "</button>";
+  }
+
+  function taskOrder() {
+    var ids = [];
+    WEEKS.forEach(function (w) { COURSES.forEach(function (c) { ids.push("w" + w.n + "-" + c.key); }); });
+    return ids;
+  }
+
+  function openQuiz(id) {
+    if (!QUESTIONS[id]) return;
+    if (tab !== "quiz") quiz.from = tab;
+    quiz.id = id;
+    quiz.shown = {};
+    tab = "quiz";
+    render({ top: true });
+  }
+
+  function quizTab() {
+    var id = quiz.id, parts = id.split("-");
+    var w = WEEKS[Number(parts[0].slice(1)) - 1], c = course(parts[1]), t = w.tasks[c.key];
+    var qs = QUESTIONS[id], s = quizStats(id);
+
+    var top = '<button type="button" class="iconbtn" data-act="quiz-back" aria-label="Back">' + ICON.left + "</button>" +
+      '<div class="ab-mid"><h1 class="ab-title">Review questions</h1><p class="ab-sub">' + esc(c.code + " · Week " + w.n) + "</p></div><span></span>";
+
+    var h = '<section class="qhead ' + c.key + '"><span class="code"><i class="dot"></i>' + esc(c.code) + "</span>" +
+      '<h2 class="qtopic">' + esc(t.t) + "</h2>" +
+      '<p class="qscore"><span><b>' + s.got + "</b> got it</span><span><b>" + s.again + "</b> to review again</span><span><b>" + (s.total - s.got - s.again) + "</b> not marked</span></p>" +
+      '<p class="sub">Answer each question in your head or on paper before you check.</p></section>';
+
+    h += '<ol class="qlist">';
+    qs.forEach(function (qa, i) {
+      var qid = id + "-q" + (i + 1), mark = state.quiz[qid] || "";
+      h += '<li class="q"><p class="qtext"><span class="qn">' + (i + 1) + "</span><span>" + esc(qa[0]) + "</span></p>";
+      if (quiz.shown[qid]) {
+        h += '<div class="answer"><span class="label">Answer</span><p>' + esc(qa[1]) + "</p></div>" +
+          '<div class="qbtns">' +
+            '<button type="button" class="qmark got' + (mark === "got" ? " on" : "") + '" data-act="mark" data-q="' + qid + '" data-v="got" data-focus="got-' + qid + '" aria-pressed="' + (mark === "got") + '">Got it</button>' +
+            '<button type="button" class="qmark again' + (mark === "again" ? " on" : "") + '" data-act="mark" data-q="' + qid + '" data-v="again" aria-pressed="' + (mark === "again") + '">Review again</button>' +
+          "</div>";
+      } else {
+        h += '<div class="qbtns"><button type="button" class="btn ghost" data-act="reveal" data-q="' + qid + '">Show answer</button>' +
+          (mark ? '<span class="qchip ' + mark + '">' + (mark === "got" ? "Got it" : "Review again") + "</span>" : "") + "</div>";
+      }
+      h += "</li>";
+    });
+    h += "</ol>";
+
+    var order = taskOrder(), next = order[order.indexOf(id) + 1];
+    h += '<div class="btns">';
+    if (next) {
+      var np = next.split("-");
+      h += '<button type="button" class="btn" data-act="quiz" data-id="' + next + '">Next: ' + esc(course(np[1]).code + " · Week " + np[0].slice(1)) + "</button>";
+    }
+    h += '<button type="button" class="btn ghost" data-act="quiz-reveal-all">Show all answers</button></div>';
+    if (s.got || s.again) h += '<div class="btns"><button type="button" class="linkbtn" data-act="quiz-reset">Clear my marks for this topic</button></div>';
+
+    return { top: top, body: h, plain: false };
+  }
+
+  function reviewSection() {
+    var total = 0, got = 0, rows = "";
+    WEEKS.forEach(function (w) {
+      COURSES.forEach(function (c) {
+        var id = "w" + w.n + "-" + c.key, s = quizStats(id);
+        total += s.total;
+        got += s.got;
+        if (s.again) {
+          rows += '<button type="button" class="wrow" data-act="quiz" data-id="' + id + '">' +
+            '<span class="n">' + w.n + "</span>" +
+            '<span><span class="d">' + esc(c.code) + '</span><span class="t">' + esc(w.tasks[c.key].t) + "</span></span>" +
+            '<span class="right"><span class="mark ' + c.key + '">' + s.again + " to redo</span></span>" + ICON.right + "</button>";
+        }
+      });
+    });
+    return '<section class="section"><h2>Review questions</h2>' +
+      '<p class="sub">' + got + " of " + total + " questions marked Got it.</p>" +
+      (rows
+        ? '<p class="label">To review again</p><div class="weeks">' + rows + "</div>"
+        : '<p class="sub">Questions you mark Review again collect here, so you can find them before a midterm.</p>') +
+      "</section>";
   }
 
   /* ---------- daily reminders ---------- */
@@ -502,7 +615,7 @@
   /* ---------- progress codes ---------- */
 
   function makeCode() {
-    var payload = JSON.stringify({ d: Object.keys(state.done), t: state.dates, u: state.updated });
+    var payload = JSON.stringify({ d: Object.keys(state.done), t: state.dates, q: state.quiz, u: state.updated });
     return "SP1-" + btoa(unescape(encodeURIComponent(payload)));
   }
   function readCode(str) {
@@ -512,7 +625,7 @@
       var o = JSON.parse(decodeURIComponent(escape(atob(str.slice(4)))));
       var done = {};
       (Array.isArray(o.d) ? o.d : []).forEach(function (k) { done[k] = true; });
-      return norm({ done: done, dates: o.t, updated: o.u });
+      return norm({ done: done, dates: o.t, quiz: o.q, updated: o.u });
     } catch (e) { return null; }
   }
 
@@ -547,6 +660,9 @@
     Object.keys(incoming.dates).forEach(function (k) {
       if (!state.dates[k] || incoming.updated > state.updated) state.dates[k] = incoming.dates[k];
     });
+    Object.keys(incoming.quiz).forEach(function (k) {
+      if (!state.quiz[k] || incoming.updated > state.updated) state.quiz[k] = incoming.quiz[k];
+    });
     save();
     render();
     toast(added ? "Added " + added + (added === 1 ? " tick" : " ticks") : "No new ticks in that code. Dates were updated.");
@@ -565,6 +681,11 @@
     var act = b.getAttribute("data-act");
     if (act === "prev") stepWeek(-1);
     if (act === "next") stepWeek(1);
+    if (act === "quiz-back") {
+      if (quiz.from === "week") weekIdx = Number(quiz.id.split("-")[0].slice(1)) - 1;
+      tab = quiz.from;
+      render({ top: true });
+    }
   });
 
   view.addEventListener("click", function (e) {
@@ -578,6 +699,30 @@
     else if (act === "install" && installEvent) {
       installEvent.prompt();
       installEvent.userChoice.then(function () { installEvent = null; render(); }, function () {});
+    }
+    else if (act === "quiz") openQuiz(b.getAttribute("data-id"));
+    else if (act === "reveal") {
+      var rq = b.getAttribute("data-q");
+      quiz.shown[rq] = true;
+      render();
+      var gotBtn = view.querySelector('[data-focus="got-' + rq + '"]');
+      if (gotBtn) gotBtn.focus({ preventScroll: true });
+    }
+    else if (act === "mark") {
+      var mq = b.getAttribute("data-q"), mv = b.getAttribute("data-v");
+      if (state.quiz[mq] === mv) delete state.quiz[mq]; else state.quiz[mq] = mv;
+      save();
+      render();
+    }
+    else if (act === "quiz-reveal-all") {
+      (QUESTIONS[quiz.id] || []).forEach(function (_, i) { quiz.shown[quiz.id + "-q" + (i + 1)] = true; });
+      render();
+    }
+    else if (act === "quiz-reset") {
+      Object.keys(state.quiz).forEach(function (k) { if (k.indexOf(quiz.id + "-q") === 0) delete state.quiz[k]; });
+      save();
+      render();
+      toast("Marks cleared for this topic");
     }
     else if (act === "remind-on") turnOnReminders();
     else if (act === "remind-off") turnOffReminders();
