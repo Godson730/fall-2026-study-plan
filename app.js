@@ -35,7 +35,25 @@
         if (/^fc-c\d{4}-\d{2}$/.test(k) && (s.cards[k] === "know" || s.cards[k] === "learning")) cardMarks[k] = s.cards[k];
       });
     }
-    return { v: 1, updated: Number(s.updated) || 0, done: done, dates: dates, quiz: quizMarks, cards: cardMarks };
+    var examsSaved = {};
+    if (s.exams && typeof s.exams === "object") {
+      Object.keys(s.exams).forEach(function (k) {
+        if (!/^c\d{4}$/.test(k) || !Array.isArray(s.exams[k])) return;
+        examsSaved[k] = s.exams[k].filter(function (a) { return a && typeof a.at === "number"; }).slice(-10).map(function (a) {
+          var mc = {}, pts = {};
+          if (a.mc && typeof a.mc === "object") {
+            Object.keys(a.mc).forEach(function (i) { if (/^\d{1,2}$/.test(i) && [0, 1, 2, 3].indexOf(a.mc[i]) >= 0) mc[i] = a.mc[i]; });
+          }
+          if (a.pts && typeof a.pts === "object") {
+            Object.keys(a.pts).forEach(function (i) {
+              if (/^\d{1,2}$/.test(i) && Array.isArray(a.pts[i])) pts[i] = a.pts[i].slice(0, 10).map(function (v) { return v ? 1 : 0; });
+            });
+          }
+          return { at: a.at, mc: mc, pts: pts };
+        });
+      });
+    }
+    return { v: 1, updated: Number(s.updated) || 0, done: done, dates: dates, quiz: quizMarks, cards: cardMarks, exams: examsSaved };
   }
 
   var state;
@@ -258,7 +276,7 @@
   /* ---------- Exams tab ---------- */
 
   function examsTab() {
-    var h = '<section class="section"><h2>Your dates</h2><p class="sub">Copy these from each CourseLink outline and the final exam schedule.</p><div class="dates">';
+    var h = practiceSection() + '<section class="section"><h2>Your dates</h2><p class="sub">Copy these from each CourseLink outline and the final exam schedule.</p><div class="dates">';
     COURSES.forEach(function (c) {
       h += '<div class="dcard ' + c.key + '"><span class="code"><i class="dot"></i>' + esc(c.code) + " · " + esc(c.name) + '</span><div class="dfields">';
       [["mid", "Midterm", "2026-09-10"], ["final", "Final exam", "2026-12-01"]].forEach(function (f) {
@@ -357,7 +375,7 @@
 
   /* ---------- render ---------- */
 
-  var TABS = { week: weekTab, semester: semesterTab, cards: cardsTab, exams: examsTab, guide: guideTab, quiz: quizTab };
+  var TABS = { week: weekTab, semester: semesterTab, cards: cardsTab, exams: examsTab, guide: guideTab, quiz: quizTab, exam: examTab };
 
   function render(opts) {
     var r = TABS[tab]();
@@ -365,7 +383,7 @@
     bar.innerHTML = r.top;
     view.innerHTML = r.body;
     document.querySelectorAll(".tab").forEach(function (b) {
-      if (b.getAttribute("data-tab") === (tab === "quiz" ? quiz.from : tab)) b.setAttribute("aria-current", "page");
+      if (b.getAttribute("data-tab") === (tab === "quiz" ? quiz.from : tab === "exam" ? "exams" : tab)) b.setAttribute("aria-current", "page");
       else b.removeAttribute("aria-current");
     });
     if (opts && opts.top) window.scrollTo(0, 0);
@@ -643,6 +661,240 @@
     return { top: top, body: h, plain: true };
   }
 
+  /* ---------- practice midterms ---------- */
+
+  var EXAMS = window.PRACTICE_EXAMS || {};
+  var LS_DRAFT = "studyplan-exam-draft-v1";
+  var drafts;
+  try { drafts = JSON.parse(localStorage.getItem(LS_DRAFT)) || {}; } catch (e) { drafts = {}; }
+  function saveDrafts() { try { localStorage.setItem(LS_DRAFT, JSON.stringify(drafts)); } catch (e) {} }
+
+  var ex = { course: null, view: "intro", confirmSubmit: false, confirmDiscard: false };
+  var LETTERS = "ABCD";
+
+  function rubricMax(q) { return q.r.reduce(function (m, r) { return m + r[1]; }, 0); }
+  function examTotal(def) { return def.questions.reduce(function (n, q) { return n + (q.t === "mc" ? 1 : rubricMax(q)); }, 0); }
+  function mcCount(def) { return def.questions.filter(function (q) { return q.t === "mc"; }).length; }
+  function attemptScore(def, att) {
+    var s = 0;
+    def.questions.forEach(function (q, i) {
+      if (q.t === "mc") { if (att.mc[i] === q.a) s += 1; }
+      else { var p = att.pts[i] || []; q.r.forEach(function (r, j) { if (p[j]) s += r[1]; }); }
+    });
+    return s;
+  }
+  function attemptsFor(key) { return state.exams[key] || []; }
+  function latestAttempt(key) { var a = attemptsFor(key); return a.length ? a[a.length - 1] : null; }
+  function fmt(n) { return String(Math.round(n * 100) / 100); }
+  function remainingSec(def, d) { return Math.max(0, Math.round(def.minutes * 60 - (Date.now() - d.started) / 1000)); }
+  function mmss(sec) { var m = Math.floor(sec / 60), s = sec % 60; return m + ":" + (s < 10 ? "0" : "") + s; }
+
+  function practiceSection() {
+    var h = '<section class="section"><h2>Practice midterms</h2><p class="sub">One per course, covering weeks 1–6. Your real midterm may cover a different range, so check CourseLink.</p><div class="weeks">';
+    COURSES.forEach(function (c) {
+      var def = EXAMS[c.key];
+      if (!def) return;
+      var total = examTotal(def), atts = attemptsFor(c.key), d = drafts[c.key], status;
+      if (d) status = d.timed ? "In progress · " + Math.ceil(remainingSec(def, d) / 60) + " min left" : "In progress";
+      else if (atts.length) {
+        var best = Math.max.apply(null, atts.map(function (a) { return attemptScore(def, a); }));
+        status = "Best " + fmt(best) + "/" + total + " (" + Math.round(best / total * 100) + "%)";
+      } else status = "Not taken yet";
+      h += '<button type="button" class="wrow" data-act="exam-open" data-c="' + c.key + '">' +
+        '<span class="n"><i class="dot ' + c.key + '"></i></span>' +
+        '<span><span class="d">' + esc(c.code) + '</span><span class="t">' + def.questions.length + " questions · " + total + " marks · " + def.minutes + " min</span></span>" +
+        '<span class="right"><span class="exstat">' + esc(status) + "</span></span>" + ICON.right + "</button>";
+    });
+    return h + "</div></section>";
+  }
+
+  function openExam(key) {
+    if (!EXAMS[key]) return;
+    ex.course = key;
+    ex.view = "intro";
+    ex.confirmSubmit = false;
+    ex.confirmDiscard = false;
+    tab = "exam";
+    render({ top: true });
+  }
+
+  function startExam(timed) {
+    drafts[ex.course] = { started: Date.now(), timed: timed, mc: {}, notes: {} };
+    saveDrafts();
+    ex.view = "taking";
+    ex.confirmSubmit = false;
+    render({ top: true });
+  }
+
+  function finalizeExam(key, auto) {
+    var def = EXAMS[key], d = drafts[key];
+    if (!def || !d) return;
+    var att = { at: Date.now(), mc: {}, pts: {} };
+    Object.keys(d.mc).forEach(function (k) { att.mc[k] = d.mc[k]; });
+    def.questions.forEach(function (q, i) { if (q.t === "sa") att.pts[i] = q.r.map(function () { return 0; }); });
+    state.exams[key] = attemptsFor(key).concat([att]).slice(-10);
+    delete drafts[key];
+    saveDrafts();
+    save();
+    if (tab === "exam" && ex.course === key) {
+      ex.view = "results";
+      ex.confirmSubmit = false;
+      render({ top: true });
+    } else if (tab === "exams") {
+      render();
+    }
+    toast(auto ? "Time’s up. Your " + course(key).code + " practice midterm was submitted." : "Submitted. Mark your written answers below.");
+  }
+
+  function examTick() {
+    Object.keys(drafts).forEach(function (key) {
+      var def = EXAMS[key], d = drafts[key];
+      if (!def || !d || typeof d.started !== "number") { delete drafts[key]; saveDrafts(); return; }
+      if (d.timed && remainingSec(def, d) <= 0) finalizeExam(key, true);
+    });
+    if (tab === "exam" && ex.view === "taking" && drafts[ex.course] && drafts[ex.course].timed) {
+      var el = document.getElementById("exam-clock");
+      if (el) {
+        var rem = remainingSec(EXAMS[ex.course], drafts[ex.course]);
+        el.textContent = mmss(rem) + " left";
+        el.classList.toggle("low", rem <= 300);
+      }
+    }
+  }
+
+  function examTab() {
+    var key = ex.course, c = course(key), def = EXAMS[key];
+    var top = '<button type="button" class="iconbtn" data-act="exam-back" aria-label="Back to Exams">' + ICON.left + "</button>" +
+      '<div class="ab-mid"><h1 class="ab-title">Practice midterm</h1><p class="ab-sub">' + esc(c.code + " · Weeks " + def.weeks[0] + "–" + def.weeks[1]) + "</p></div><span></span>";
+    var body;
+    if (ex.view === "taking" && drafts[key]) body = examTaking(def, key);
+    else if (ex.view === "results" && latestAttempt(key)) body = examResults(def, key);
+    else body = examIntro(def, key, c);
+    return { top: top, body: body, plain: false };
+  }
+
+  function examIntro(def, key, c) {
+    var total = examTotal(def), mc = mcCount(def), sa = def.questions.length - mc, d = drafts[key], atts = attemptsFor(key);
+    var h = '<section class="qhead ' + key + '"><span class="code"><i class="dot"></i>' + esc(c.code + " · " + c.name) + "</span>" +
+      '<h2 class="qtopic">Practice midterm</h2>' +
+      '<p class="qscore"><span><b>' + def.questions.length + "</b> questions</span><span><b>" + total + "</b> marks</span><span><b>" + def.minutes + "</b> minutes</span></p></section>";
+    h += '<section class="install"><h3>Covers</h3><p class="sub">' + esc(def.covers) + "</p>" +
+      '<h3>Format</h3><ul class="bullets">' +
+        "<li>" + mc + " multiple-choice questions, 1 mark each, marked automatically.</li>" +
+        "<li>" + sa + " written questions worth " + fmt(total - mc) + " marks. Work them on paper, then mark yourself against the model answer.</li>" +
+        "<li>Closed book. Use a calculator and the constants given.</li>" +
+        "<li>The timer keeps running if you leave the app, and the exam submits itself when time runs out.</li>" +
+      "</ul></section>";
+    h += '<div class="btns">';
+    if (d) {
+      h += '<button type="button" class="btn" data-act="exam-continue">Continue' + (d.timed ? " (" + Math.ceil(remainingSec(def, d) / 60) + " min left)" : "") + "</button>" +
+        '<button type="button" class="btn ghost" data-act="exam-discard">' + (ex.confirmDiscard ? "Tap again to discard your answers" : "Discard and start over") + "</button>";
+    } else {
+      h += '<button type="button" class="btn" data-act="exam-start" data-timed="1">Start timed exam (' + def.minutes + " min)</button>" +
+        '<button type="button" class="btn ghost" data-act="exam-start" data-timed="0">Start without a timer</button>';
+    }
+    h += "</div>";
+    if (atts.length) {
+      h += '<section class="section"><h2>Past attempts</h2><ul class="history">';
+      atts.slice().reverse().forEach(function (a) {
+        var dt = new Date(a.at);
+        h += "<li><span>" + MONTHS[dt.getMonth()] + " " + dt.getDate() + "</span><span>" + fmt(attemptScore(def, a)) + " / " + total + "</span></li>";
+      });
+      h += '</ul><div class="btns"><button type="button" class="btn ghost" data-act="exam-results">See latest results and answers</button></div></section>';
+    }
+    return h;
+  }
+
+  function examTaking(def, key) {
+    var d = drafts[key], rem = d.timed ? remainingSec(def, d) : null;
+    var mcN = mcCount(def), answered = Object.keys(d.mc).length;
+    var h = '<div class="exbar"><span id="exam-clock" class="clock' + (rem !== null && rem <= 300 ? " low" : "") + '">' + (rem === null ? "No timer" : mmss(rem) + " left") + "</span>" +
+      '<span id="exam-progress">' + answered + " of " + mcN + " multiple choice answered</span></div>";
+    h += '<ol class="qlist">';
+    def.questions.forEach(function (q, i) {
+      h += '<li class="q"><p class="qtext"><span class="qn">' + (i + 1) + "</span><span>" + esc(q.q) +
+        '<span class="qmarks">' + (q.t === "mc" ? "1 mark" : fmt(rubricMax(q)) + " marks") + "</span></span></p>";
+      if (q.t === "mc") {
+        h += '<div class="opts" role="radiogroup" aria-label="Question ' + (i + 1) + ' options">';
+        q.o.forEach(function (opt, j) {
+          var on = d.mc[i] === j;
+          h += '<button type="button" class="opt' + (on ? " on" : "") + '" role="radio" aria-checked="' + on + '" data-act="exam-pick" data-i="' + i + '" data-j="' + j + '">' +
+            '<span class="letter">' + LETTERS[j] + "</span><span>" + esc(opt) + "</span></button>";
+        });
+        h += "</div>";
+      } else {
+        h += '<label class="label qindent" for="note-' + i + '">Notes (optional; your paper answer is what counts)</label>' +
+          '<textarea class="qindent" id="note-' + i + '" data-note="' + i + '" rows="4" spellcheck="false">' + esc(d.notes[i] || "") + "</textarea>";
+      }
+      h += "</li>";
+    });
+    h += "</ol>";
+    var unanswered = mcN - answered;
+    h += '<div class="btns">' + (ex.confirmSubmit && unanswered
+      ? '<button type="button" class="btn" data-act="exam-submit" data-force="1">Submit with ' + unanswered + " unanswered</button>" +
+        '<button type="button" class="btn ghost" data-act="exam-keep">Keep working</button>'
+      : '<button type="button" class="btn" data-act="exam-submit">Submit exam</button>') + "</div>";
+    return h;
+  }
+
+  function examResults(def, key) {
+    var att = latestAttempt(key), total = examTotal(def), score = attemptScore(def, att);
+    var mcN = mcCount(def), mcRight = 0;
+    def.questions.forEach(function (q, i) { if (q.t === "mc" && att.mc[i] === q.a) mcRight++; });
+
+    var h = '<section class="exres"><p class="label">Your score</p>' +
+      '<p class="big"><span class="big-n">' + fmt(score) + '</span><span class="big-of">/ ' + total + " · " + Math.round(score / total * 100) + "%</span></p>" +
+      '<p class="qscore"><span>Multiple choice <b>' + mcRight + "/" + mcN + "</b></span><span>Written <b>" + fmt(score - mcRight) + "/" + fmt(total - mcN) + "</b></span></p>" +
+      '<p class="sub">Written marks count once you tick the rubric points your answers earned.</p></section>';
+
+    var byWeek = {};
+    def.questions.forEach(function (q, i) {
+      var b = byWeek[q.w] || (byWeek[q.w] = [0, 0]);
+      if (q.t === "mc") { b[1] += 1; if (att.mc[i] === q.a) b[0] += 1; }
+      else { var p = att.pts[i] || []; q.r.forEach(function (r, j) { b[1] += r[1]; if (p[j]) b[0] += r[1]; }); }
+    });
+    h += '<section class="section"><h2>By week</h2><p class="sub">Tap a week to open its review questions.</p><div class="weeks">';
+    Object.keys(byWeek).map(Number).sort(function (a, b) { return a - b; }).forEach(function (wn) {
+      var b = byWeek[wn];
+      h += '<button type="button" class="wrow" data-act="quiz" data-id="w' + wn + "-" + key + '"><span class="n">' + wn + "</span>" +
+        '<span><span class="d">' + fmt(b[0]) + " / " + fmt(b[1]) + ' marks</span><span class="t">' + esc(WEEKS[wn - 1].tasks[key].t) + "</span></span>" +
+        '<span class="right">' + (b[0] / b[1] < 0.7 ? '<span class="qchip again">Review</span>' : "") + "</span>" + ICON.right + "</button>";
+    });
+    h += "</div></section>";
+
+    h += '<section class="section"><h2>Answers</h2><ol class="qlist">';
+    def.questions.forEach(function (q, i) {
+      h += '<li class="q"><p class="qtext"><span class="qn">' + (i + 1) + "</span><span>" + esc(q.q) + "</span></p>";
+      if (q.t === "mc") {
+        var pick = att.mc[i];
+        h += '<div class="opts">';
+        q.o.forEach(function (opt, j) {
+          var cls = j === q.a ? " correct" : (j === pick ? " wrong" : "");
+          var tag = j === q.a ? (j === pick ? "Your answer · correct" : "Correct answer") : (j === pick ? "Your answer" : "");
+          h += '<div class="opt static' + cls + '"><span class="letter">' + LETTERS[j] + "</span><span>" + esc(opt) + (tag ? '<b class="tag">' + tag + "</b>" : "") + "</span></div>";
+        });
+        h += "</div>" +
+          '<p class="qres ' + (pick === q.a ? "ok" : "miss") + '">' + (pick === undefined ? "Not answered" : pick === q.a ? "Correct" : "Incorrect") + "</p>" +
+          '<div class="answer"><span class="label">Why</span><p>' + esc(q.e) + "</p></div>";
+      } else {
+        var p = att.pts[i] || [], got = 0;
+        q.r.forEach(function (r, j) { if (p[j]) got += r[1]; });
+        h += '<div class="answer"><span class="label">Model answer</span><p>' + lines(q.s) + "</p></div>" +
+          '<p class="label qindent">Tick what your answer earned · ' + fmt(got) + " / " + fmt(rubricMax(q)) + "</p>" +
+          '<div class="rows qindent">';
+        q.r.forEach(function (r, j) {
+          h += '<label class="row"><input type="checkbox" class="check sm" data-rubric="' + i + "-" + j + '"' + (p[j] ? " checked" : "") + ">" +
+            "<span>" + esc(r[0]) + ' <b class="pts">' + fmt(r[1]) + (r[1] === 1 ? " mark" : " marks") + "</b></span></label>";
+        });
+        h += "</div>";
+      }
+      h += "</li>";
+    });
+    h += "</ol></section>" +
+      '<div class="btns"><button type="button" class="btn" data-act="exam-retake">Take it again</button><button type="button" class="btn ghost" data-act="exam-back">Back to Exams</button></div>';
+    return h;
+  }
+
   /* ---------- daily reminders ---------- */
 
   var CFG = window.REMINDER_CONFIG || {};
@@ -766,7 +1018,7 @@
   /* ---------- progress codes ---------- */
 
   function makeCode() {
-    var payload = JSON.stringify({ d: Object.keys(state.done), t: state.dates, q: state.quiz, k: state.cards, u: state.updated });
+    var payload = JSON.stringify({ d: Object.keys(state.done), t: state.dates, q: state.quiz, k: state.cards, x: state.exams, u: state.updated });
     return "SP1-" + btoa(unescape(encodeURIComponent(payload)));
   }
   function readCode(str) {
@@ -776,7 +1028,7 @@
       var o = JSON.parse(decodeURIComponent(escape(atob(str.slice(4)))));
       var done = {};
       (Array.isArray(o.d) ? o.d : []).forEach(function (k) { done[k] = true; });
-      return norm({ done: done, dates: o.t, quiz: o.q, cards: o.k, updated: o.u });
+      return norm({ done: done, dates: o.t, quiz: o.q, cards: o.k, exams: o.x, updated: o.u });
     } catch (e) { return null; }
   }
 
@@ -817,6 +1069,12 @@
     Object.keys(incoming.cards).forEach(function (k) {
       if (!state.cards[k] || incoming.updated > state.updated) state.cards[k] = incoming.cards[k];
     });
+    Object.keys(incoming.exams).forEach(function (k) {
+      var mine = state.exams[k] || [], seen = mine.map(function (a) { return a.at; });
+      var merged = mine.concat(incoming.exams[k].filter(function (a) { return seen.indexOf(a.at) < 0; }));
+      merged.sort(function (a, b) { return a.at - b.at; });
+      state.exams[k] = merged.slice(-10);
+    });
     save();
     render();
     toast(added ? "Added " + added + (added === 1 ? " tick" : " ticks") : "No new ticks in that code. Dates were updated.");
@@ -835,6 +1093,7 @@
     var act = b.getAttribute("data-act");
     if (act === "prev") stepWeek(-1);
     if (act === "next") stepWeek(1);
+    if (act === "exam-back") { tab = "exams"; render({ top: true }); }
     if (act === "quiz-back") {
       if (quiz.from === "week") weekIdx = Number(quiz.id.split("-")[0].slice(1)) - 1;
       tab = quiz.from;
@@ -855,6 +1114,38 @@
       installEvent.userChoice.then(function () { installEvent = null; render(); }, function () {});
     }
     else if (act === "quiz") openQuiz(b.getAttribute("data-id"));
+    else if (act === "exam-open") openExam(b.getAttribute("data-c"));
+    else if (act === "exam-start") startExam(b.getAttribute("data-timed") === "1");
+    else if (act === "exam-continue") { ex.view = "taking"; render({ top: true }); }
+    else if (act === "exam-discard") {
+      if (!ex.confirmDiscard) { ex.confirmDiscard = true; render(); }
+      else { delete drafts[ex.course]; saveDrafts(); ex.confirmDiscard = false; render(); toast("Answers discarded"); }
+    }
+    else if (act === "exam-pick") {
+      var pd = drafts[ex.course];
+      if (pd) {
+        var pi = b.getAttribute("data-i"), pj = Number(b.getAttribute("data-j"));
+        pd.mc[pi] = pj;
+        saveDrafts();
+        ex.confirmSubmit = false;
+        b.parentNode.querySelectorAll(".opt").forEach(function (o) {
+          var on = o === b;
+          o.classList.toggle("on", on);
+          o.setAttribute("aria-checked", String(on));
+        });
+        var prog = document.getElementById("exam-progress");
+        if (prog) prog.textContent = Object.keys(pd.mc).length + " of " + mcCount(EXAMS[ex.course]) + " multiple choice answered";
+      }
+    }
+    else if (act === "exam-submit") {
+      var sd = drafts[ex.course], left = sd ? mcCount(EXAMS[ex.course]) - Object.keys(sd.mc).length : 0;
+      if (left && b.getAttribute("data-force") !== "1") { ex.confirmSubmit = true; render(); toast(left + (left === 1 ? " question is" : " questions are") + " unanswered"); }
+      else finalizeExam(ex.course, false);
+    }
+    else if (act === "exam-keep") { ex.confirmSubmit = false; render(); }
+    else if (act === "exam-results") { ex.view = "results"; render({ top: true }); }
+    else if (act === "exam-retake") { ex.view = "intro"; ex.confirmDiscard = false; render({ top: true }); }
+    else if (act === "exam-back") { tab = "exams"; render({ top: true }); }
     else if (act === "cards-for") {
       fc.course = b.getAttribute("data-c");
       fc.range = "week";
@@ -938,11 +1229,27 @@
       render();
       var again = view.querySelector('[data-task="' + id + '"]');
       if (again && document.activeElement === document.body) again.focus({ preventScroll: true });
+    } else if (t.matches("input[data-rubric]")) {
+      var att = latestAttempt(ex.course), ij = t.getAttribute("data-rubric").split("-");
+      if (att) {
+        att.pts[ij[0]] = att.pts[ij[0]] || [];
+        att.pts[ij[0]][Number(ij[1])] = t.checked ? 1 : 0;
+        save();
+        render();
+      }
     } else if (t.matches("input[data-date]")) {
       var k = t.getAttribute("data-date");
       if (DATE_RE.test(t.value)) state.dates[k] = t.value; else delete state.dates[k];
       save();
       render();
+    }
+  });
+
+  view.addEventListener("input", function (e) {
+    var t = e.target;
+    if (t.matches && t.matches("textarea[data-note]") && drafts[ex.course]) {
+      drafts[ex.course].notes[t.getAttribute("data-note")] = t.value;
+      saveDrafts();
     }
   });
 
@@ -976,12 +1283,14 @@
   window.addEventListener("appinstalled", function () { installEvent = null; render(); });
 
   document.addEventListener("visibilitychange", function () {
-    if (document.visibilityState === "visible" && tab !== "guide") render();
+    if (document.visibilityState === "visible" && tab !== "guide" && tab !== "exam") render();
   });
 
   render();
   syncToWorker();
   checkReminders();
+  examTick();
+  setInterval(examTick, 1000);
 
   if ("serviceWorker" in navigator && location.protocol !== "file:") {
     window.addEventListener("load", function () {

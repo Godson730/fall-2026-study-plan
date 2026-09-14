@@ -23,3 +23,7 @@ Every weekly topic has five review questions with worked answers (`questions.js`
 ## Flashcards
 
 The Cards tab has flashcards for key formulas and reactions (`flashcards.js`), tagged by course and week. Study them one at a time (tap to flip, mark Know it or Still learning) or switch to List for a formula sheet. Each Week card links to that week's flashcards.
+
+## Practice midterms
+
+The Exams tab has a practice midterm for each course covering weeks 1-6 (`practice-exams.js`): 12 auto-marked multiple-choice questions and 3 written questions marked against a model answer and rubric, with an optional 50-minute timer and a by-week breakdown linking to review questions.
