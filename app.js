@@ -38,7 +38,7 @@
     var examsSaved = {};
     if (s.exams && typeof s.exams === "object") {
       Object.keys(s.exams).forEach(function (k) {
-        if (!/^c\d{4}$/.test(k) || !Array.isArray(s.exams[k])) return;
+        if (!/^c\d{4}(-final)?$/.test(k) || !Array.isArray(s.exams[k])) return;
         examsSaved[k] = s.exams[k].filter(function (a) { return a && typeof a.at === "number"; }).slice(-10).map(function (a) {
           var mc = {}, pts = {};
           if (a.mc && typeof a.mc === "object") {
@@ -689,23 +689,36 @@
   function remainingSec(def, d) { return Math.max(0, Math.round(def.minutes * 60 - (Date.now() - d.started) / 1000)); }
   function mmss(sec) { var m = Math.floor(sec / 60), s = sec % 60; return m + ":" + (s < 10 ? "0" : "") + s; }
 
+  function examCourse(id) { return id.split("-")[0]; }
+  function examLabel(def) { return def.kind === "final" ? "Practice final" : "Practice midterm"; }
+
+  function examRow(id, c) {
+    var def = EXAMS[id];
+    if (!def) return "";
+    var total = examTotal(def), atts = attemptsFor(id), d = drafts[id], status;
+    if (d) status = d.timed ? "In progress · " + Math.ceil(remainingSec(def, d) / 60) + " min left" : "In progress";
+    else if (atts.length) {
+      var best = Math.max.apply(null, atts.map(function (a) { return attemptScore(def, a); }));
+      status = "Best " + fmt(best) + "/" + total + " (" + Math.round(best / total * 100) + "%)";
+    } else status = "Not taken";
+    var length = def.minutes >= 60 ? (def.minutes / 60) + " h" : def.minutes + " min";
+    return '<button type="button" class="wrow" data-act="exam-open" data-c="' + id + '">' +
+      '<span class="n"><i class="dot ' + c.key + '"></i></span>' +
+      '<span><span class="d">' + esc(c.code) + '</span><span class="t">' + total + " marks · " + length + "</span></span>" +
+      '<span class="right"><span class="exstat">' + esc(status) + "</span></span>" + ICON.right + "</button>";
+  }
+
   function practiceSection() {
-    var h = '<section class="section"><h2>Practice midterms</h2><p class="sub">One per course, covering weeks 1–6. Your real midterm may cover a different range, so check CourseLink.</p><div class="weeks">';
+    var mids = "", finals = "";
     COURSES.forEach(function (c) {
-      var def = EXAMS[c.key];
-      if (!def) return;
-      var total = examTotal(def), atts = attemptsFor(c.key), d = drafts[c.key], status;
-      if (d) status = d.timed ? "In progress · " + Math.ceil(remainingSec(def, d) / 60) + " min left" : "In progress";
-      else if (atts.length) {
-        var best = Math.max.apply(null, atts.map(function (a) { return attemptScore(def, a); }));
-        status = "Best " + fmt(best) + "/" + total + " (" + Math.round(best / total * 100) + "%)";
-      } else status = "Not taken yet";
-      h += '<button type="button" class="wrow" data-act="exam-open" data-c="' + c.key + '">' +
-        '<span class="n"><i class="dot ' + c.key + '"></i></span>' +
-        '<span><span class="d">' + esc(c.code) + '</span><span class="t">' + def.questions.length + " questions · " + total + " marks · " + def.minutes + " min</span></span>" +
-        '<span class="right"><span class="exstat">' + esc(status) + "</span></span>" + ICON.right + "</button>";
+      mids += examRow(c.key, c);
+      finals += examRow(c.key + "-final", c);
     });
-    return h + "</div></section>";
+    var toExams = Math.round((day(EXAM.start).getTime() - today().getTime()) / 86400000);
+    var finalsHtml = '<section class="section"><h2>Practice finals</h2><p class="sub">Cumulative (weeks 1–12), weighted toward weeks 7–12, 2 hours each.' +
+      (toExams > 0 ? " The exam period starts in " + toExams + (toExams === 1 ? " day." : " days.") : "") + '</p><div class="weeks">' + finals + "</div></section>";
+    var midsHtml = '<section class="section"><h2>Practice midterms</h2><p class="sub">Weeks 1–6. Your real midterm may cover a different range, so check CourseLink.</p><div class="weeks">' + mids + "</div></section>";
+    return nowIndex() >= 6 ? finalsHtml + midsHtml : midsHtml + finalsHtml;
   }
 
   function openExam(key) {
@@ -743,7 +756,7 @@
     } else if (tab === "exams") {
       render();
     }
-    toast(auto ? "Time’s up. Your " + course(key).code + " practice midterm was submitted." : "Submitted. Mark your written answers below.");
+    toast(auto ? "Time’s up. Your " + course(examCourse(key)).code + " " + examLabel(def).toLowerCase() + " was submitted." : "Submitted. Mark your written answers below.");
   }
 
   function examTick() {
@@ -763,9 +776,9 @@
   }
 
   function examTab() {
-    var key = ex.course, c = course(key), def = EXAMS[key];
+    var key = ex.course, c = course(examCourse(key)), def = EXAMS[key];
     var top = '<button type="button" class="iconbtn" data-act="exam-back" aria-label="Back to Exams">' + ICON.left + "</button>" +
-      '<div class="ab-mid"><h1 class="ab-title">Practice midterm</h1><p class="ab-sub">' + esc(c.code + " · Weeks " + def.weeks[0] + "–" + def.weeks[1]) + "</p></div><span></span>";
+      '<div class="ab-mid"><h1 class="ab-title">' + examLabel(def) + '</h1><p class="ab-sub">' + esc(c.code + " · Weeks " + def.weeks[0] + "–" + def.weeks[1]) + "</p></div><span></span>";
     var body;
     if (ex.view === "taking" && drafts[key]) body = examTaking(def, key);
     else if (ex.view === "results" && latestAttempt(key)) body = examResults(def, key);
@@ -776,7 +789,7 @@
   function examIntro(def, key, c) {
     var total = examTotal(def), mc = mcCount(def), sa = def.questions.length - mc, d = drafts[key], atts = attemptsFor(key);
     var h = '<section class="qhead ' + key + '"><span class="code"><i class="dot"></i>' + esc(c.code + " · " + c.name) + "</span>" +
-      '<h2 class="qtopic">Practice midterm</h2>' +
+      '<h2 class="qtopic">' + examLabel(def) + "</h2>" +
       '<p class="qscore"><span><b>' + def.questions.length + "</b> questions</span><span><b>" + total + "</b> marks</span><span><b>" + def.minutes + "</b> minutes</span></p></section>";
     h += '<section class="install"><h3>Covers</h3><p class="sub">' + esc(def.covers) + "</p>" +
       '<h3>Format</h3><ul class="bullets">' +
@@ -838,7 +851,7 @@
   }
 
   function examResults(def, key) {
-    var att = latestAttempt(key), total = examTotal(def), score = attemptScore(def, att);
+    var att = latestAttempt(key), total = examTotal(def), score = attemptScore(def, att), ck = examCourse(key);
     var mcN = mcCount(def), mcRight = 0;
     def.questions.forEach(function (q, i) { if (q.t === "mc" && att.mc[i] === q.a) mcRight++; });
 
@@ -856,8 +869,8 @@
     h += '<section class="section"><h2>By week</h2><p class="sub">Tap a week to open its review questions.</p><div class="weeks">';
     Object.keys(byWeek).map(Number).sort(function (a, b) { return a - b; }).forEach(function (wn) {
       var b = byWeek[wn];
-      h += '<button type="button" class="wrow" data-act="quiz" data-id="w' + wn + "-" + key + '"><span class="n">' + wn + "</span>" +
-        '<span><span class="d">' + fmt(b[0]) + " / " + fmt(b[1]) + ' marks</span><span class="t">' + esc(WEEKS[wn - 1].tasks[key].t) + "</span></span>" +
+      h += '<button type="button" class="wrow" data-act="quiz" data-id="w' + wn + "-" + ck + '"><span class="n">' + wn + "</span>" +
+        '<span><span class="d">' + fmt(b[0]) + " / " + fmt(b[1]) + ' marks</span><span class="t">' + esc(WEEKS[wn - 1].tasks[ck].t) + "</span></span>" +
         '<span class="right">' + (b[0] / b[1] < 0.7 ? '<span class="qchip again">Review</span>' : "") + "</span>" + ICON.right + "</button>";
     });
     h += "</div></section>";

@@ -1,7 +1,7 @@
 /* Offline support: keep a copy of every app file so the plan opens without a connection. */
 importScripts("./data.js", "./reminder.js");
 
-var CACHE = "studyplan-v5";
+var CACHE = "studyplan-v6";
 var PROGRESS = "studyplan-progress"; /* the app keeps a copy of your ticks here for reminders */
 var FILES = [
   "./",
@@ -14,6 +14,7 @@ var FILES = [
   "./questions.js",
   "./flashcards.js",
   "./practice-exams.js",
+  "./practice-finals.js",
   "./manifest.webmanifest",
   "./icons/icon-192.png",
   "./icons/icon-512.png",

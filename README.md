@@ -27,3 +27,7 @@ The Cards tab has flashcards for key formulas and reactions (`flashcards.js`), t
 ## Practice midterms
 
 The Exams tab has a practice midterm for each course covering weeks 1-6 (`practice-exams.js`): 12 auto-marked multiple-choice questions and 3 written questions marked against a model answer and rubric, with an optional 50-minute timer and a by-week breakdown linking to review questions.
+
+## Practice finals
+
+The Exams tab also has a cumulative practice final for each course (`practice-finals.js`): weeks 1-12, weighted toward weeks 7-12, with 20 multiple-choice questions and 4 written questions (40 marks, 2 hours). After week 6 the finals are listed above the midterms.
